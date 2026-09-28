@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 using System;
+using System.Globalization;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
@@ -71,6 +72,57 @@ namespace GameManager.Core
         public static bool IsCorruptDataError(Exception e)
         {
             return e is SerializationException || e is XmlException;
+        }
+
+        /// <summary>
+        /// Writes indented UTF-8 JSON to a temporary file next to path, flushes it to disk, then swaps it in
+        /// (AtomicFile.Replace). Creates the folder. I/O and permission errors pass through.
+        /// </summary>
+        public static void WriteAtomic<T>(string path, T value) where T : class
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                var serializer = new DataContractJsonSerializer(typeof(T), SerializerSettings);
+                using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    using (XmlDictionaryWriter writer = JsonReaderWriterFactory.CreateJsonWriter(stream, new UTF8Encoding(false), false, true, "  "))
+                    {
+                        serializer.WriteObject(writer, value);
+                    }
+                    stream.Flush(true);
+                }
+                AtomicFile.Replace(temp, path);
+            }
+            finally
+            {
+                AtomicFile.TryDelete(temp);
+            }
+        }
+
+        private const string UtcFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+
+        /// <summary>
+        /// "2026-09-28T10:00:00Z", or null for null.
+        /// </summary>
+        public static string FormatUtc(DateTime? value)
+        {
+            return value?.ToUniversalTime().ToString(UtcFormat, CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// The UTC time written by FormatUtc, or null when text is missing or not in that format.
+        /// </summary>
+        public static DateTime? ParseUtc(string text)
+        {
+            DateTime parsed;
+            if (DateTime.TryParseExact(text, UtcFormat, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out parsed))
+            {
+                return parsed;
+            }
+            return null;
         }
     }
 }

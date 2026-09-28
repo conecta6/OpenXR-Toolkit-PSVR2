@@ -15,6 +15,8 @@
   <ItemGroup>
     <!-- DataContractJsonSerializer (R10): BCL only, no JSON NuGet package in the shipped app. -->
     <Reference Include="System.Runtime.Serialization" />
+    <!-- HttpClient (R12). Not an implicit SDK reference for .NET Framework. -->
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 
   <ItemGroup>

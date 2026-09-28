@@ -26,4 +26,9 @@
     <None Include="..\GameManager\compatibility.json" Link="compatibility.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- HttpRequestException, thrown by FakeHttpDownloader. -->
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
 </Project>

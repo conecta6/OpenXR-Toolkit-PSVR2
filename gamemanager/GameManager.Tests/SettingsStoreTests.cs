@@ -137,5 +137,27 @@ namespace GameManager.Tests
             Assert.IsNull(settings.LastUpdateCheckUtc);
             Assert.AreEqual(0, warnings.Count);
         }
+
+        /// <summary>
+        /// T4-2: forces AtomicFile.Replace's File.Replace call to fail (the destination exists but is locked
+        /// exclusively) and checks that JsonFile.WriteAtomic's cleanup still removes the temporary file it made,
+        /// and that the original, still-intact destination is untouched.
+        /// </summary>
+        [TestMethod]
+        public void Save_DestinationLockedSoSwapFails_LeavesNoTempFileAndKeepsOriginal()
+        {
+            var store = new SettingsStore(path);
+            store.Save(new AppSettings { OpenCompositeLicenseAccepted = true });
+            string originalContent = File.ReadAllText(path);
+
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                Assert.ThrowsException<IOException>(
+                    () => store.Save(new AppSettings { OpenCompositeLicenseAccepted = false }));
+            }
+
+            CollectionAssert.AreEqual(new[] { path }, Directory.GetFiles(temp.PathOf("AppData")));
+            Assert.AreEqual(originalContent, File.ReadAllText(path));
+        }
     }
 }

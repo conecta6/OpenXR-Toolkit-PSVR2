@@ -36,7 +36,17 @@ namespace GameManager.Core
         {
             if (File.Exists(destination))
             {
-                File.Replace(source, destination, null);
+                try
+                {
+                    File.Replace(source, destination, null);
+                }
+                catch (Exception) when (!File.Exists(destination) && File.Exists(source))
+                {
+                    // T4-1: File.Replace can, in rare cases, delete destination without finishing the swap,
+                    // leaving neither the old nor the new content in place. Recover by moving source (still
+                    // intact) into destination's spot instead of losing both copies.
+                    File.Move(source, destination);
+                }
             }
             else
             {

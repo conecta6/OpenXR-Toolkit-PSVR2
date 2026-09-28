@@ -30,7 +30,10 @@ namespace GameManager.Core
     {
         /// <summary>
         /// Absolute path with backslashes and no trailing separator, except a drive root ("E:\").
-        /// Throws ArgumentException for an empty path; Path.GetFullPath exceptions pass through.
+        /// Throws ArgumentException for an empty path and for a path that is not fully qualified (R3): relative
+        /// ("Games"), drive-relative ("D:Games", "D:") or relative to the current drive ("\Games"). Those would
+        /// otherwise be resolved against the process's current folder, which has nothing to do with Steam.
+        /// Path.GetFullPath exceptions pass through.
         /// </summary>
         public static string NormalizeDirectory(string path)
         {
@@ -38,13 +41,36 @@ namespace GameManager.Core
             {
                 throw new ArgumentException("Path is empty.", nameof(path));
             }
-            string full = Path.GetFullPath(path.Trim().Replace('/', '\\'));
+            string candidate = path.Trim().Replace('/', '\\');
+            if (!IsFullyQualified(candidate))
+            {
+                throw new ArgumentException("Path is not absolute: \"" + path.Trim() + "\".", nameof(path));
+            }
+            string full = Path.GetFullPath(candidate);
             string trimmed = full.TrimEnd('\\');
             if (trimmed.Length == 2 && trimmed[1] == ':')
             {
                 return trimmed + "\\";
             }
             return trimmed.Length == 0 ? full : trimmed;
+        }
+
+        /// <summary>
+        /// True for "C:\..." (drive letter, colon, separator) and for UNC or device paths ("\\server\share",
+        /// "\\?\C:\..."). False for "Games", "D:Games", "D:" and "\Games". Forward slashes count as separators.
+        /// </summary>
+        public static bool IsFullyQualified(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
+            string p = path.Replace('/', '\\');
+            if (p.Length >= 3 && IsDriveLetter(p[0]) && p[1] == ':' && p[2] == '\\')
+            {
+                return true;
+            }
+            return p.Length > 2 && p[0] == '\\' && p[1] == '\\';
         }
 
         /// <summary>
@@ -56,6 +82,11 @@ namespace GameManager.Core
                 || e is NotSupportedException
                 || e is PathTooLongException
                 || e is SecurityException;
+        }
+
+        private static bool IsDriveLetter(char c)
+        {
+            return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
         }
     }
 }

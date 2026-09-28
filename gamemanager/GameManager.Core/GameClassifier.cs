@@ -41,6 +41,7 @@ namespace GameManager.Core
             string root = PathUtil.NormalizeDirectory(installDir);
             var dlls = new List<OpenVrDll>();
             var antiCheatMarkers = new List<string>();
+            var uncheckedFolders = new List<string>();
             var warnings = new List<string>();
             bool hasOpenXrLoader = false;
 
@@ -68,6 +69,7 @@ namespace GameManager.Core
                             if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
                             {
                                 warnings.Add("Skipped link: " + entry.FullName);
+                                uncheckedFolders.Add(entry.FullName);
                             }
                             else
                             {
@@ -92,11 +94,13 @@ namespace GameManager.Core
                 {
                     // IOException covers PathTooLongException and DirectoryNotFoundException.
                     warnings.Add("Could not read folder " + directory.FullName + ": " + e.Message);
+                    uncheckedFolders.Add(directory.FullName);
                 }
             }
 
             dlls.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
             antiCheatMarkers.Sort(StringComparer.OrdinalIgnoreCase);
+            uncheckedFolders.Sort(StringComparer.OrdinalIgnoreCase);
 
             GameKind kind;
             if (dlls.Count > 0)
@@ -111,7 +115,7 @@ namespace GameManager.Core
             {
                 kind = GameKind.Unknown;
             }
-            return new GameClassification(kind, dlls, hasOpenXrLoader, antiCheatMarkers, warnings);
+            return new GameClassification(kind, dlls, hasOpenXrLoader, antiCheatMarkers, uncheckedFolders, warnings);
         }
 
         private static PeMachine ReadMachine(string path, List<string> warnings)

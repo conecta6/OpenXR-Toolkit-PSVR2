@@ -110,5 +110,14 @@ namespace GameManager.Tests
 
             Assert.IsNull(new WindowsRegistryReader().ReadString(RegistryHive.CurrentUser, RegistryView.Default, subKey, "Missing"));
         }
+
+        [TestMethod]
+        public void FindSteamRoot_RelativeRegistryPath_IsIgnored()
+        {
+            // "." always exists (the current folder), so before R3 it was accepted as the Steam folder.
+            registry.Set(RegistryHive.CurrentUser, RegistryView.Default, UserKey, "SteamPath", ".");
+
+            Assert.IsNull(new SteamLocator(registry).FindSteamRoot());
+        }
     }
 }

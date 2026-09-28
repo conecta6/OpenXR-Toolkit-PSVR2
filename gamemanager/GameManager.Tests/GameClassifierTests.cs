@@ -289,6 +289,69 @@ namespace GameManager.Tests
             Assert.IsTrue(result.Warnings.Any(w => w.StartsWith("Skipped link:")));
         }
 
+        [TestMethod]
+        public void Classify_CompleteWalk_HasNoUncheckedFolders()
+        {
+            temp.WriteBytes(@"Game\Sub\openvr_api.dll", PeFixture.Build(PeFixture.MachineX64));
+
+            GameClassification result = GameClassifier.Classify(GameDir);
+
+            Assert.AreEqual(0, result.UncheckedFolders.Count);
+        }
+
+        [TestMethod]
+        public void Classify_MissingInstallFolder_IsAnUncheckedFolder()
+        {
+            GameClassification result = GameClassifier.Classify(GameDir);
+
+            Assert.AreEqual(1, result.UncheckedFolders.Count);
+            Assert.AreEqual(GameDir, result.UncheckedFolders[0], true);
+        }
+
+        [TestMethod]
+        [Timeout(30000)]
+        public void Classify_JunctionInsideGame_IsAnUncheckedFolder()
+        {
+            temp.CreateDirectory("Game");
+            temp.CreateDirectory("Outside");
+            if (!temp.TryCreateJunction(@"Game\LinkToOutside", temp.PathOf("Outside")))
+            {
+                Assert.Inconclusive("Could not create a directory junction with mklink /J on this machine.");
+            }
+
+            GameClassification result = GameClassifier.Classify(GameDir);
+
+            Assert.AreEqual(1, result.UncheckedFolders.Count);
+            Assert.AreEqual(Path.Combine(GameDir, "LinkToOutside"), result.UncheckedFolders[0], true);
+        }
+
+        [TestMethod]
+        public void Classify_UnreadableFolder_IsAnUncheckedFolder()
+        {
+            string locked = temp.CreateDirectory(@"Game\Locked");
+            var rule = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User, FileSystemRights.ListDirectory, AccessControlType.Deny);
+            DirectorySecurity security = Directory.GetAccessControl(locked);
+            security.AddAccessRule(rule);
+            Directory.SetAccessControl(locked, security);
+            try
+            {
+                if (CanList(locked))
+                {
+                    Assert.Inconclusive("A deny ACL did not block listing for this account.");
+                }
+
+                GameClassification result = GameClassifier.Classify(GameDir);
+
+                Assert.AreEqual(1, result.UncheckedFolders.Count);
+                Assert.AreEqual(locked, result.UncheckedFolders[0], true);
+            }
+            finally
+            {
+                security.RemoveAccessRule(rule);
+                Directory.SetAccessControl(locked, security);
+            }
+        }
+
         private static bool CanList(string directory)
         {
             try

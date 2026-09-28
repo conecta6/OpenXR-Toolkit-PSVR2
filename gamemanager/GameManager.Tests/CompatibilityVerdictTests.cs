@@ -75,5 +75,25 @@ namespace GameManager.Tests
             Assert.AreEqual(CompatibilityStatus.Broken, verdict.ListStatus);
             Assert.AreEqual("Input", verdict.Notes);
         }
+
+        [TestMethod]
+        public void For_UncheckedFolders_AntiCheatNotRuledOutButNotBlocked()
+        {
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0], new[] { @"C:\Games\X\Link" });
+
+            Assert.IsFalse(verdict.Blocked);
+            Assert.IsTrue(verdict.AntiCheatNotRuledOut);
+            Assert.AreEqual(1, verdict.UncheckedFolders.Count);
+            Assert.AreEqual(@"C:\Games\X\Link", verdict.UncheckedFolders[0]);
+        }
+
+        [TestMethod]
+        public void For_WithoutUncheckedFolders_AntiCheatIsRuledOut()
+        {
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0]);
+
+            Assert.IsFalse(verdict.AntiCheatNotRuledOut);
+            Assert.AreEqual(0, verdict.UncheckedFolders.Count);
+        }
     }
 }

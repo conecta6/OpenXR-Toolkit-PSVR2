@@ -90,7 +90,8 @@ namespace GameManager.Core
                 {
                     warnings.Add(game.Name + ": " + warning);
                 }
-                CompatibilityVerdict verdict = CompatibilityVerdict.For(compatibility.Find(game.AppId), classification.AntiCheatMarkers);
+                CompatibilityVerdict verdict = CompatibilityVerdict.For(
+                    compatibility.Find(game.AppId), classification.AntiCheatMarkers, classification.UncheckedFolders);
                 entries.Add(new GameEntry(game, classification, verdict));
             }
             return new GameListResult(steamRoot, entries, warnings);
@@ -107,7 +108,8 @@ namespace GameManager.Core
                 // R1: one odd game must never empty the whole list. It is listed as Unknown (so it can never be
                 // patched) with a warning, and the scan goes on.
                 warnings.Add(game.Name + ": could not be classified (" + e.GetType().Name + ": " + e.Message + ").");
-                return new GameClassification(GameKind.Unknown, new OpenVrDll[0], false, new string[0], new string[0]);
+                // The walk did not finish, so nothing under the install folder was ruled out (R31).
+                return new GameClassification(GameKind.Unknown, new OpenVrDll[0], false, new string[0], new[] { game.InstallDir }, new string[0]);
             }
         }
     }

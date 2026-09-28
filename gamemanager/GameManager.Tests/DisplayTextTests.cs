@@ -119,5 +119,15 @@ namespace GameManager.Tests
                 "OpenComposite: x64 downloaded 2026-09-28 (new build available), x86 downloaded (date unknown)",
                 DisplayText.OpenCompositeSummary(builds));
         }
+
+        [TestMethod]
+        public void CompatibilityDetails_AntiCheatNotRuledOut_NamesTheFolders()
+        {
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0], new[] { @"C:\G\Link", @"C:\G\Locked" });
+
+            Assert.AreEqual(
+                @"Anti-cheat not ruled out: these folders could not be checked: C:\G\Link, C:\G\Locked.",
+                DisplayText.CompatibilityDetails(verdict));
+        }
     }
 }

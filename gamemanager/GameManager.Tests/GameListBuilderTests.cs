@@ -239,6 +239,47 @@ namespace GameManager.Tests
             Assert.AreEqual(1, result.Entries.Count);
         }
 
+        [TestMethod]
+        public void BuildFrom_UncheckedFoldersReachTheVerdict()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            string game = steam.AddGame(steam.SteamRoot, 620980, "Beat Saber", "Beat Saber");
+            string link = Path.Combine(game, "Link");
+
+            GameListResult result = GameListBuilder.BuildFrom(
+                steam.SteamRoot,
+                CompatibilityList.Empty,
+                null,
+                CancellationToken.None,
+                installDir => new GameClassification(
+                    GameKind.OpenVr,
+                    new[] { new OpenVrDll("openvr_api.dll", PeMachine.X64) },
+                    false,
+                    new string[0],
+                    new[] { link },
+                    new[] { "Skipped link: " + link }));
+
+            Assert.IsTrue(result.Entries[0].Compatibility.AntiCheatNotRuledOut);
+            Assert.AreEqual(link, result.Entries[0].Compatibility.UncheckedFolders[0]);
+        }
+
+        [TestMethod]
+        public void BuildFrom_ClassifierThrows_AntiCheatIsNotRuledOut()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            string odd = steam.AddGame(steam.SteamRoot, 555, "Odd Game", "Odd Game");
+
+            GameListResult result = GameListBuilder.BuildFrom(
+                steam.SteamRoot,
+                CompatibilityList.Empty,
+                null,
+                CancellationToken.None,
+                installDir => throw new InvalidOperationException("unexpected walk failure"));
+
+            Assert.IsTrue(result.Entries[0].Compatibility.AntiCheatNotRuledOut);
+            Assert.AreEqual(odd, result.Entries[0].Compatibility.UncheckedFolders[0], true);
+        }
+
         private sealed class ListProgress : IProgress<string>
         {
             private readonly Action<string> onReport;

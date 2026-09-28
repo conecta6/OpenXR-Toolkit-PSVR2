@@ -59,12 +59,14 @@ namespace GameManager.Core
             IReadOnlyList<OpenVrDll> openVrDlls,
             bool hasOpenXrLoader,
             IReadOnlyList<string> antiCheatMarkers,
+            IReadOnlyList<string> uncheckedFolders,
             IReadOnlyList<string> warnings)
         {
             Kind = kind;
             OpenVrDlls = openVrDlls;
             HasOpenXrLoader = hasOpenXrLoader;
             AntiCheatMarkers = antiCheatMarkers;
+            UncheckedFolders = uncheckedFolders;
             Warnings = warnings;
         }
 
@@ -77,6 +79,13 @@ namespace GameManager.Core
         /// Empty when there is none. Any entry blocks the game.
         /// </summary>
         public IReadOnlyList<string> AntiCheatMarkers { get; }
+
+        /// <summary>
+        /// R31: full paths of folders the walk did not look inside — links (junctions, symbolic links) below the
+        /// install folder, which are skipped, and folders that could not be read. Anti-cheat files there would have
+        /// been missed, so anti-cheat is "not ruled out" when this is not empty. Empty when the whole tree was walked.
+        /// </summary>
+        public IReadOnlyList<string> UncheckedFolders { get; }
 
         public IReadOnlyList<string> Warnings { get; }
     }

@@ -29,12 +29,18 @@ namespace GameManager.Core
     /// </summary>
     public sealed class CompatibilityVerdict
     {
-        private CompatibilityVerdict(CompatibilityStatus listStatus, bool blocked, string reason, string notes)
+        private CompatibilityVerdict(
+            CompatibilityStatus listStatus,
+            bool blocked,
+            string reason,
+            string notes,
+            IReadOnlyList<string> uncheckedFolders)
         {
             ListStatus = listStatus;
             Blocked = blocked;
             Reason = reason;
             Notes = notes;
+            UncheckedFolders = uncheckedFolders;
         }
 
         /// <summary>
@@ -57,7 +63,30 @@ namespace GameManager.Core
         /// </summary>
         public string Notes { get; }
 
+        /// <summary>
+        /// R31: folders the classification walk could not look inside (skipped links, unreadable folders).
+        /// Empty when the whole install folder was checked.
+        /// </summary>
+        public IReadOnlyList<string> UncheckedFolders { get; }
+
+        /// <summary>
+        /// R29/R31: true when some folders were not checked, so anti-cheat files there would have been missed.
+        /// The game is not blocked for this, but Patch asks first (default No).
+        /// </summary>
+        public bool AntiCheatNotRuledOut
+        {
+            get { return UncheckedFolders.Count > 0; }
+        }
+
         public static CompatibilityVerdict For(CompatibilityEntry listEntry, IReadOnlyList<string> antiCheatMarkers)
+        {
+            return For(listEntry, antiCheatMarkers, new string[0]);
+        }
+
+        public static CompatibilityVerdict For(
+            CompatibilityEntry listEntry,
+            IReadOnlyList<string> antiCheatMarkers,
+            IReadOnlyList<string> uncheckedFolders)
         {
             CompatibilityStatus status = listEntry == null ? CompatibilityStatus.Untested : listEntry.Status;
             var reasons = new List<string>(2);
@@ -70,7 +99,8 @@ namespace GameManager.Core
                 reasons.Add("Anti-cheat files found: " + string.Join(", ", antiCheatMarkers) + ".");
             }
             string notes = listEntry == null ? "" : listEntry.Notes;
-            return new CompatibilityVerdict(status, reasons.Count > 0, string.Join(" ", reasons), notes);
+            var folders = uncheckedFolders == null ? new List<string>() : new List<string>(uncheckedFolders);
+            return new CompatibilityVerdict(status, reasons.Count > 0, string.Join(" ", reasons), notes, folders);
         }
     }
 }

@@ -250,5 +250,133 @@ namespace GameManager.Tests
             Assert.AreEqual("alpha", result.Games[0].Name);
             Assert.AreEqual("Zeta", result.Games[1].Name);
         }
+
+        [TestMethod]
+        public void FindLibraries_RelativeLibraryPath_IsSkippedWithWarning()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot, "SteamLibrary"));
+            var warnings = new List<string>();
+
+            IReadOnlyList<string> libraries = SteamLibraryScanner.FindLibraries(steam.SteamRoot, warnings);
+
+            Assert.AreEqual(1, libraries.Count);
+            Assert.AreEqual(1, warnings.Count, string.Join("\n", warnings));
+            StringAssert.Contains(warnings[0], "Invalid library path \"SteamLibrary\"");
+        }
+
+        [TestMethod]
+        public void FindLibraries_DriveRelativeLibraryPath_IsSkippedWithWarning()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot, "D:SteamLibrary"));
+            var warnings = new List<string>();
+
+            IReadOnlyList<string> libraries = SteamLibraryScanner.FindLibraries(steam.SteamRoot, warnings);
+
+            Assert.AreEqual(1, libraries.Count);
+            Assert.AreEqual(1, warnings.Count, string.Join("\n", warnings));
+            StringAssert.Contains(warnings[0], "Invalid library path \"D:SteamLibrary\"");
+        }
+
+        [TestMethod]
+        public void FindLibraries_NoLibraryFoldersBlock_ScansSteamRootWithWarning()
+        {
+            steam.WriteLibraryFolders("\"SomethingElse\"\n{\n\t\"1\"\t\t\"D:\\\\Lib\"\n}\n");
+            var warnings = new List<string>();
+
+            IReadOnlyList<string> libraries = SteamLibraryScanner.FindLibraries(steam.SteamRoot, warnings);
+
+            Assert.AreEqual(1, libraries.Count);
+            Assert.AreEqual(1, warnings.Count, string.Join("\n", warnings));
+            StringAssert.Contains(warnings[0], "has no \"libraryfolders\" block");
+        }
+
+        [TestMethod]
+        public void FindLibraries_NumericEntryWithoutPath_WarnsAndKeepsOthers()
+        {
+            string libD = steam.CreateLibrary("SteamLibraryD");
+            steam.WriteLibraryFolders(
+                "\"libraryfolders\"\n{\n" +
+                "\t\"0\"\n\t{\n\t\t\"path\"\t\t\"" + SteamFixture.Escape(steam.SteamRoot) + "\"\n\t}\n" +
+                "\t\"1\"\n\t{\n\t\t\"label\"\t\t\"no path here\"\n\t}\n" +
+                "\t\"2\"\n\t{\n\t\t\"path\"\t\t\"" + SteamFixture.Escape(libD) + "\"\n\t}\n" +
+                "}\n");
+            var warnings = new List<string>();
+
+            IReadOnlyList<string> libraries = SteamLibraryScanner.FindLibraries(steam.SteamRoot, warnings);
+
+            Assert.AreEqual(2, libraries.Count);
+            Assert.AreEqual(libD, libraries[1], true);
+            Assert.AreEqual(1, warnings.Count, string.Join("\n", warnings));
+            StringAssert.Contains(warnings[0], "Library entry \"1\"");
+            StringAssert.Contains(warnings[0], "has no path");
+        }
+
+        [TestMethod]
+        public void Scan_ManifestWithoutAppState_IsSkippedWithWarning()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            File.WriteAllText(Path.Combine(steam.SteamRoot, "steamapps", "appmanifest_5.acf"), "\"Other\"\n{\n\t\"appid\"\t\t\"5\"\n}\n");
+
+            LibraryScanResult result = SteamLibraryScanner.Scan(steam.SteamRoot);
+
+            Assert.AreEqual(0, result.Games.Count);
+            Assert.AreEqual(1, result.Warnings.Count, string.Join("\n", result.Warnings));
+            StringAssert.Contains(result.Warnings[0], "no \"AppState\" block");
+        }
+
+        [TestMethod]
+        public void Scan_ManifestWithoutInstallDir_IsSkippedWithWarning()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            File.WriteAllText(
+                Path.Combine(steam.SteamRoot, "steamapps", "appmanifest_6.acf"),
+                "\"AppState\"\n{\n\t\"appid\"\t\t\"6\"\n\t\"name\"\t\t\"No Folder\"\n}\n");
+
+            LibraryScanResult result = SteamLibraryScanner.Scan(steam.SteamRoot);
+
+            Assert.AreEqual(0, result.Games.Count);
+            Assert.AreEqual(1, result.Warnings.Count, string.Join("\n", result.Warnings));
+            StringAssert.Contains(result.Warnings[0], "No Folder (6): no installdir");
+        }
+
+        [TestMethod]
+        public void Scan_ManifestWithoutName_UsesAppNumber()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            steam.AddGame(steam.SteamRoot, 42, "", "Nameless");
+
+            LibraryScanResult result = SteamLibraryScanner.Scan(steam.SteamRoot);
+
+            Assert.AreEqual(1, result.Games.Count);
+            Assert.AreEqual("App 42", result.Games[0].Name);
+            Assert.AreEqual(0, result.Warnings.Count, string.Join("\n", result.Warnings));
+        }
+
+        [TestMethod]
+        public void Scan_AcfOldFile_IsIgnored()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            steam.AddGame(steam.SteamRoot, 7, "Old", "Old");
+            string manifest = Path.Combine(steam.SteamRoot, "steamapps", "appmanifest_7.acf");
+            File.Move(manifest, manifest + "_old");
+
+            LibraryScanResult result = SteamLibraryScanner.Scan(steam.SteamRoot);
+
+            Assert.AreEqual(0, result.Games.Count);
+            Assert.AreEqual(0, result.Warnings.Count, string.Join("\n", result.Warnings));
+        }
+
+        [TestMethod]
+        public void Scan_DriveRelativeInstallDir_IsSkippedWithWarning()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            steam.AddGame(steam.SteamRoot, 8, "Drive Relative", "D:Game", createFolder: false);
+
+            LibraryScanResult result = SteamLibraryScanner.Scan(steam.SteamRoot);
+
+            Assert.AreEqual(0, result.Games.Count);
+            Assert.AreEqual(1, result.Warnings.Count, string.Join("\n", result.Warnings));
+            StringAssert.Contains(result.Warnings[0], "invalid installdir \"D:Game\"");
+        }
     }
 }

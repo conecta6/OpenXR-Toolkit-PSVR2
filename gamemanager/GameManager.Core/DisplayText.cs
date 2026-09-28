@@ -88,6 +88,10 @@ namespace GameManager.Core
             {
                 parts.Add(verdict.Reason);
             }
+            if (verdict.AntiCheatNotRuledOut)
+            {
+                parts.Add("Anti-cheat not ruled out: these folders could not be checked: " + string.Join(", ", verdict.UncheckedFolders) + ".");
+            }
             if (verdict.Notes.Length > 0)
             {
                 parts.Add("Notes: " + verdict.Notes);

@@ -53,5 +53,23 @@ namespace GameManager.Tests
         {
             Assert.ThrowsException<ArgumentException>(() => PathUtil.NormalizeDirectory("  "));
         }
+
+        [TestMethod]
+        [DataRow("Games")]
+        [DataRow(@"..\Games")]
+        [DataRow("D:Games")]
+        [DataRow("D:")]
+        [DataRow(@"\Games")]
+        public void NormalizeDirectory_NotFullyQualified_Throws(string path)
+        {
+            // R3: these would otherwise be resolved against the process's current folder or drive.
+            Assert.ThrowsException<ArgumentException>(() => PathUtil.NormalizeDirectory(path));
+        }
+
+        [TestMethod]
+        public void NormalizeDirectory_UncPath_IsKept()
+        {
+            Assert.AreEqual(@"\\server\share\SteamLibrary", PathUtil.NormalizeDirectory(@"\\server\share\SteamLibrary\"));
+        }
     }
 }

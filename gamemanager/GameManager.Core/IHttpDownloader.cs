@@ -32,9 +32,9 @@ namespace GameManager.Core
     {
         /// <summary>
         /// Downloads url into destinationPath (created or overwritten), following redirects. Throws
-        /// HttpRequestException for a network error, a non-success status or a body shorter than the server's
-        /// declared Content-Length, TimeoutException when the server is too slow, and OperationCanceledException
-        /// when cancellation is requested.
+        /// HttpRequestException for a network error, a non-success status, or a body whose length differs from
+        /// the server's declared Content-Length (any mismatch, not only a short body), TimeoutException when the
+        /// server is too slow, and OperationCanceledException when cancellation is requested.
         /// </summary>
         Task DownloadToFileAsync(string url, string destinationPath, CancellationToken cancellation);
     }

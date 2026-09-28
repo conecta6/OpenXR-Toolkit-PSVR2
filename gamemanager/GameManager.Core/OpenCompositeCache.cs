@@ -24,7 +24,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Net.Http;
 using System.Runtime.Serialization;
 using System.Security;
 using System.Threading;
@@ -314,12 +313,17 @@ namespace GameManager.Core
 
         /// <summary>
         /// Downloads to a new temporary file next to the cached DLL (same volume, so the later replace is a rename)
-        /// and validates it. Returns the temporary path, or an error with no file left behind.
+        /// and validates it. Returns the temporary path (kept on disk for the caller), or an error with no file
+        /// left behind. Cleanup is a try/finally keyed on whether the fetch and validation actually succeeded,
+        /// not on a list of exception types: whatever the downloader throws is either the caller's own
+        /// cancellation (propagated as-is) or turned into a Failed outcome, and either way the temporary file
+        /// never survives this method unless it is the one being handed back.
         /// </summary>
         private async Task<FetchResult> FetchValidatedAsync(OpenCompositeArch arch, CancellationToken cancellation)
         {
             string folder = ArchFolder(arch);
             string temp = Path.Combine(folder, DllName + ".download-" + Guid.NewGuid().ToString("N") + ".tmp");
+            bool keepTemp = false;
             try
             {
                 Directory.CreateDirectory(folder);
@@ -328,26 +332,33 @@ namespace GameManager.Core
                     // Left behind by a run that was killed mid-download.
                     AtomicFile.TryDelete(stale);
                 }
-                await http.DownloadToFileAsync(SourceUrl(arch), temp, cancellation).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-            {
-                AtomicFile.TryDelete(temp);
-                throw;
-            }
-            catch (Exception e) when (e is HttpRequestException || e is TimeoutException || e is OperationCanceledException || IsDiskError(e))
-            {
-                AtomicFile.TryDelete(temp);
-                return new FetchResult(null, "Download of OpenComposite " + ArchName(arch) + " failed: " + e.Message);
-            }
+                try
+                {
+                    await http.DownloadToFileAsync(SourceUrl(arch), temp, cancellation).ConfigureAwait(false);
+                }
+                catch (Exception e) when (!(e is OperationCanceledException && cancellation.IsCancellationRequested))
+                {
+                    // Any failure that is not the caller's own cancellation (network error, timeout, a Content-
+                    // Length mismatch, or anything else IHttpDownloader might throw) is reported as Failed; the
+                    // caller's cancellation propagates unchanged instead (documented on DownloadAsync).
+                    return new FetchResult(null, "Download of OpenComposite " + ArchName(arch) + " failed: " + e.Message);
+                }
 
-            string problem = Validate(temp, arch);
-            if (problem != null)
-            {
-                AtomicFile.TryDelete(temp);
-                return new FetchResult(null, "The downloaded OpenComposite " + ArchName(arch) + " file was rejected: " + problem + " Nothing was changed.");
+                string problem = Validate(temp, arch);
+                if (problem != null)
+                {
+                    return new FetchResult(null, "The downloaded OpenComposite " + ArchName(arch) + " file was rejected: " + problem + " Nothing was changed.");
+                }
+                keepTemp = true;
+                return new FetchResult(temp, null);
             }
-            return new FetchResult(temp, null);
+            finally
+            {
+                if (!keepTemp)
+                {
+                    AtomicFile.TryDelete(temp);
+                }
+            }
         }
 
         private Dictionary<string, CacheEntryDto> ReadCacheFile(IList<string> warnings)

@@ -188,6 +188,7 @@ namespace GameManager.Tests
             Assert.AreEqual(DownloadStatus.Failed, outcome.Status);
             StringAssert.Contains(outcome.Message, "too small");
             Assert.IsFalse(File.Exists(cache.DllPath(OpenCompositeArch.X64)));
+            Assert.AreEqual(0, AllTempFiles().Length);
         }
 
         [TestMethod]
@@ -246,6 +247,37 @@ namespace GameManager.Tests
 
             Assert.IsFalse(File.Exists(cache.DllPath(OpenCompositeArch.X64)));
             Assert.AreEqual(0, AllTempFiles().Length);
+        }
+
+        /// <summary>
+        /// Unlike Download_UserCancellation_Throws (an already-canceled token, so FakeHttpDownloader throws
+        /// before writing anything — the cleanup line in FetchValidatedAsync's cancellation path is never
+        /// actually exercised), this writes real bytes first and cancels the caller's own token only as the
+        /// simulated connection drops, so a temporary file genuinely exists on disk when the cancellation-path
+        /// cleanup has to remove it.
+        /// </summary>
+        [TestMethod]
+        public async Task Download_CanceledMidTransfer_PropagatesAndLeavesNoTempFile()
+        {
+            AcceptLicense();
+            using (var cts = new CancellationTokenSource())
+            {
+                http.WritePartialThenThrow = stream => stream.Write(new byte[50 * 1024], 0, 50 * 1024);
+                http.ExceptionAfterPartialWrite = () =>
+                {
+                    // Cancel the caller's own token first, so the cache sees a token that is genuinely
+                    // canceled by the time it inspects cancellation.IsCancellationRequested, not just an
+                    // OperationCanceledException thrown for its type alone.
+                    cts.Cancel();
+                    return new OperationCanceledException("Canceled mid-download.", cts.Token);
+                };
+
+                await Assert.ThrowsExceptionAsync<OperationCanceledException>(
+                    () => cache.DownloadAsync(OpenCompositeArch.X64, new List<string>(), cts.Token));
+
+                Assert.IsFalse(File.Exists(cache.DllPath(OpenCompositeArch.X64)));
+                Assert.AreEqual(0, AllTempFiles().Length);
+            }
         }
 
         [TestMethod]

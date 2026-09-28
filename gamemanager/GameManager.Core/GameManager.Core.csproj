@@ -20,7 +20,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Test seams (GameListBuilder's classifier delegate) stay internal. -->
+    <!-- Test seams (GameListBuilder's classifier delegate, HttpDownloader's HttpMessageHandler/timeout
+         constructor) stay internal. -->
     <InternalsVisibleTo Include="GameManager.Tests" />
   </ItemGroup>
 

@@ -44,11 +44,20 @@ namespace GameManager.Tests
 
         /// <summary>
         /// F3: when set, used instead of Respond. Writes some bytes to destinationPath and then throws, so a
-        /// dropped connection mid-download can be simulated with a temporary file genuinely on disk when the
-        /// exception propagates — the "no temporary file left behind" tests would otherwise pass trivially,
-        /// because Respond throwing before any write leaves nothing to clean up in the first place.
+        /// dropped connection (or a cancellation) mid-download can be simulated with a temporary file genuinely
+        /// on disk when the exception propagates — the "no temporary file left behind" tests would otherwise
+        /// pass trivially, because Respond throwing before any write leaves nothing to clean up in the first
+        /// place.
         /// </summary>
         public Action<Stream> WritePartialThenThrow { get; set; }
+
+        /// <summary>
+        /// The exception thrown after WritePartialThenThrow runs. Defaults to a network error; a test covering
+        /// the cancellation path sets this to build and throw an OperationCanceledException instead (typically
+        /// after canceling the caller's own CancellationTokenSource, so the cache sees a genuinely canceled
+        /// token, not just the exception type).
+        /// </summary>
+        public Func<Exception> ExceptionAfterPartialWrite { get; set; } = () => new HttpRequestException("The connection was closed before the response completed.");
 
         public Task DownloadToFileAsync(string url, string destinationPath, CancellationToken cancellation)
         {
@@ -60,7 +69,7 @@ namespace GameManager.Tests
                 {
                     WritePartialThenThrow(stream);
                 }
-                throw new HttpRequestException("The connection was closed before the response completed.");
+                throw ExceptionAfterPartialWrite();
             }
             File.WriteAllBytes(destinationPath, Respond(url));
             return Task.CompletedTask;

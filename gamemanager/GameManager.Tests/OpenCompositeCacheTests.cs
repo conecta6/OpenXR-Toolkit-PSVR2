@@ -236,6 +236,34 @@ namespace GameManager.Tests
             Assert.AreEqual(0, AllTempFiles().Length);
         }
 
+        /// <summary>
+        /// Regression test for the fix-round-2 finding: FetchValidatedAsync's Directory.CreateDirectory (and the
+        /// stale-temp-file cleanup right after it) used to run inside a try with only a finally, so a disk error
+        /// there escaped DownloadAsync as an unhandled exception instead of the documented Failed outcome. A file
+        /// sitting where the architecture folder should be forces Directory.CreateDirectory to throw IOException.
+        /// </summary>
+        [TestMethod]
+        public async Task Download_ArchitectureFolderPathIsAFile_ReturnsFailedWithoutThrowingAndLeavesCacheUntouched()
+        {
+            AcceptLicense();
+            http.Respond = url => OpenCompositeFixture.Dll(PeFixture.MachineX86, 1);
+            await cache.DownloadAsync(OpenCompositeArch.X86, new List<string>(), CancellationToken.None);
+            string cacheJsonBefore = File.ReadAllText(temp.PathOf(@"AppData\opencomposite\cache.json"));
+            string x86HashBefore = FileHash.Sha256(cache.DllPath(OpenCompositeArch.X86));
+
+            // Sabotage the x64 architecture folder: a file where OpenCompositeCache expects a directory.
+            temp.WriteText(@"AppData\opencomposite\x64", "not a directory");
+            var warnings = new List<string>();
+
+            DownloadOutcome outcome = await cache.DownloadAsync(OpenCompositeArch.X64, warnings, CancellationToken.None);
+
+            Assert.AreEqual(DownloadStatus.Failed, outcome.Status);
+            StringAssert.Contains(outcome.Message, "failed");
+            Assert.AreEqual(cacheJsonBefore, File.ReadAllText(temp.PathOf(@"AppData\opencomposite\cache.json")));
+            Assert.AreEqual(x86HashBefore, FileHash.Sha256(cache.DllPath(OpenCompositeArch.X86)));
+            Assert.AreEqual(0, AllTempFiles().Length);
+        }
+
         [TestMethod]
         public async Task Download_UserCancellation_Throws()
         {

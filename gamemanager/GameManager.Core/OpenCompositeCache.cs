@@ -314,10 +314,10 @@ namespace GameManager.Core
         /// <summary>
         /// Downloads to a new temporary file next to the cached DLL (same volume, so the later replace is a rename)
         /// and validates it. Returns the temporary path (kept on disk for the caller), or an error with no file
-        /// left behind. Cleanup is a try/finally keyed on whether the fetch and validation actually succeeded,
-        /// not on a list of exception types: whatever the downloader throws is either the caller's own
-        /// cancellation (propagated as-is) or turned into a Failed outcome, and either way the temporary file
-        /// never survives this method unless it is the one being handed back.
+        /// left behind. Cleanup is a try/finally keyed on whether the fetch and validation actually succeeded.
+        /// A failure at any stage — preparing the architecture folder, the download itself, or validation —
+        /// becomes a Failed outcome, except the caller's own cancellation, which propagates unchanged (documented
+        /// on DownloadAsync).
         /// </summary>
         private async Task<FetchResult> FetchValidatedAsync(OpenCompositeArch arch, CancellationToken cancellation)
         {
@@ -326,12 +326,20 @@ namespace GameManager.Core
             bool keepTemp = false;
             try
             {
-                Directory.CreateDirectory(folder);
-                foreach (string stale in Directory.GetFiles(folder, TempPattern))
+                try
                 {
-                    // Left behind by a run that was killed mid-download.
-                    AtomicFile.TryDelete(stale);
+                    Directory.CreateDirectory(folder);
+                    foreach (string stale in Directory.GetFiles(folder, TempPattern))
+                    {
+                        // Left behind by a run that was killed mid-download.
+                        AtomicFile.TryDelete(stale);
+                    }
                 }
+                catch (Exception e) when (IsDiskError(e))
+                {
+                    return new FetchResult(null, "Download of OpenComposite " + ArchName(arch) + " failed: " + e.Message);
+                }
+
                 try
                 {
                     await http.DownloadToFileAsync(SourceUrl(arch), temp, cancellation).ConfigureAwait(false);

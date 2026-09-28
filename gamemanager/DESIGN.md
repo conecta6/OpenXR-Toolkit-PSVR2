@@ -96,8 +96,12 @@ writer for the toolkit's per-application registry keys (`HKCU\SOFTWARE\OpenXR_To
 - **Excluded from the list**: Steam tools that are not games, at minimum SteamVR (AppID 250820, which
   itself ships `openvr_api.dll`) and Steamworks Common Redistributables (228980).
 
-Folder walking skips reparse points (junctions, symlinks) and folders it cannot read, and records them as
-warnings instead of failing. Scanning runs off the UI thread.
+Folder walking always walks the install folder itself, even if it is a junction or symlink (users who move a
+game to another drive and leave a link behind must still get a classification). Reparse-point subfolders
+found below the install folder are skipped, to avoid link loops and walking outside the game. Reparse-point
+files are not skipped: CompactGUI and `compact /exe` (WOF) compress files into reparse points, and many Steam
+users compress their games, so skipping them would hide `openvr_api.dll`. Folders it cannot read are recorded
+as warnings instead of failing. Scanning runs off the UI thread.
 
 ### Safety model (phases 4–6)
 

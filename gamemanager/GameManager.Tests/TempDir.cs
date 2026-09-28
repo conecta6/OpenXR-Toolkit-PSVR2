@@ -101,10 +101,29 @@ namespace GameManager.Tests
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
             };
             using (Process process = Process.Start(info))
             {
-                process.WaitForExit();
+                // Discard both streams via async event reads, so a tool's console output (e.g. mklink's
+                // "Junction created for ...") never leaks into the test output, and so a full pipe buffer
+                // can never deadlock WaitForExit.
+                process.OutputDataReceived += (sender, e) => { };
+                process.ErrorDataReceived += (sender, e) => { };
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                if (!process.WaitForExit(30000))
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                    return -1;
+                }
                 return process.ExitCode;
             }
         }

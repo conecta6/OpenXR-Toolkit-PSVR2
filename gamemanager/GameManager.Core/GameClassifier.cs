@@ -67,7 +67,10 @@ namespace GameManager.Core
                         }
                         else if (string.Equals(entry.Name, OpenVrDllName, StringComparison.OrdinalIgnoreCase))
                         {
-                            // Reparse-point files are NOT skipped: CompactGUI / compact /exe (WOF) files are reparse points.
+                            // Reparse-point files are NOT skipped: compression tools such as CompactGUI or compact /exe
+                            // (WOF) may mark a file as a reparse point, though user-mode code does not always see that
+                            // bit on such a file. Either way, the file must still be read, or a compressed openvr_api.dll
+                            // would be missed.
                             dlls.Add(new OpenVrDll(Relative(root, entry.FullName), ReadMachine(entry.FullName, warnings)));
                         }
                         else if (string.Equals(entry.Name, OpenXrLoaderName, StringComparison.OrdinalIgnoreCase))

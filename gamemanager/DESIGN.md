@@ -98,10 +98,12 @@ writer for the toolkit's per-application registry keys (`HKCU\SOFTWARE\OpenXR_To
 
 Folder walking always walks the install folder itself, even if it is a junction or symlink (users who move a
 game to another drive and leave a link behind must still get a classification). Reparse-point subfolders
-found below the install folder are skipped, to avoid link loops and walking outside the game. Reparse-point
-files are not skipped: CompactGUI and `compact /exe` (WOF) compress files into reparse points, and many Steam
-users compress their games, so skipping them would hide `openvr_api.dll`. Folders it cannot read are recorded
-as warnings instead of failing. Scanning runs off the UI thread.
+found below the install folder are skipped and recorded as warnings, to avoid link loops and walking outside
+the game. Reparse-point files are not skipped: compression tools such as CompactGUI or `compact /exe` (WOF)
+may mark a compressed file as a reparse point, though that attribute is not always visible to user-mode code
+on such a file, and many Steam users compress their games, so skipping reparse-point files would risk hiding
+`openvr_api.dll`. Folders it cannot read are recorded as warnings instead of failing. Scanning runs off the UI
+thread.
 
 ### Safety model (phases 4–6)
 

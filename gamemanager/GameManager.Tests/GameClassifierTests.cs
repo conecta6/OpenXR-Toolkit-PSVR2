@@ -23,6 +23,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using GameManager.Core;
@@ -200,13 +201,18 @@ namespace GameManager.Tests
         public void Classify_LockedDll_ReportsUnknownWithWarning()
         {
             string dll = temp.WriteBytes(@"Game\openvr_api.dll", PeFixture.Build(PeFixture.MachineX64));
+            temp.WriteBytes(@"Game\Sub\openvr_api.dll", PeFixture.Build(PeFixture.MachineX86));
 
             using (new FileStream(dll, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
                 GameClassification result = GameClassifier.Classify(GameDir);
 
                 Assert.AreEqual(GameKind.OpenVr, result.Kind);
+                Assert.AreEqual(2, result.OpenVrDlls.Count);
+                Assert.AreEqual("openvr_api.dll", result.OpenVrDlls[0].RelativePath);
                 Assert.AreEqual(PeMachine.Unknown, result.OpenVrDlls[0].Machine);
+                Assert.AreEqual(@"Sub\openvr_api.dll", result.OpenVrDlls[1].RelativePath);
+                Assert.AreEqual(PeMachine.X86, result.OpenVrDlls[1].Machine);
                 Assert.AreEqual(1, result.Warnings.Count);
                 StringAssert.Contains(result.Warnings[0], "openvr_api.dll");
             }
@@ -217,7 +223,7 @@ namespace GameManager.Tests
         {
             string dll = temp.WriteBytes(@"Game\openvr_api.dll", PeFixture.Build(PeFixture.MachineX64, 0x80, 65536));
             int exitCode = TempDir.RunHidden("compact.exe", "/c /exe:xpress4k \"" + dll + "\"");
-            if (exitCode != 0 || (File.GetAttributes(dll) & FileAttributes.ReparsePoint) == 0)
+            if (exitCode != 0 || !NativeMethods.IsCompressedSmallerThanLength(dll, new FileInfo(dll).Length))
             {
                 Assert.Inconclusive("compact.exe could not WOF-compress the test file on this volume.");
             }
@@ -239,6 +245,31 @@ namespace GameManager.Tests
             catch (UnauthorizedAccessException)
             {
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Test-only access to the real on-disk size of a file, bypassing File.GetAttributes: the WOF
+        /// compression filter driver can hide FILE_ATTRIBUTE_REPARSE_POINT from managed attribute APIs
+        /// (File.GetAttributes, DirectoryInfo.EnumerateFileSystemInfos) even on a file it has compressed,
+        /// so that bit cannot be used to detect WOF compression from a test.
+        /// </summary>
+        private static class NativeMethods
+        {
+            private const uint InvalidFileSize = 0xFFFFFFFF;
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            private static extern uint GetCompressedFileSizeW(string lpFileName, out uint lpFileSizeHigh);
+
+            public static bool IsCompressedSmallerThanLength(string path, long length)
+            {
+                uint low = GetCompressedFileSizeW(path, out uint high);
+                if (low == InvalidFileSize && Marshal.GetLastWin32Error() != 0)
+                {
+                    return false;
+                }
+                long compressedSize = ((long)high << 32) | low;
+                return compressedSize < length;
             }
         }
     }

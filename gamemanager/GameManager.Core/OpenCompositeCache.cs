@@ -369,6 +369,172 @@ namespace GameManager.Core
             }
         }
 
+        /// <summary>
+        /// R14: at startup, upstream is checked at most once per this interval.
+        /// </summary>
+        public static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(24);
+
+        public static bool IsUpdateCheckDue(DateTime? lastCheckUtc, DateTime nowUtc)
+        {
+            if (lastCheckUtc == null)
+            {
+                return true;
+            }
+            // A last check "in the future" means the clock was moved back or the file was edited: check now,
+            // rather than wait until that date.
+            if (lastCheckUtc.Value > nowUtc)
+            {
+                return true;
+            }
+            return nowUtc - lastCheckUtc.Value >= UpdateCheckInterval;
+        }
+
+        /// <summary>
+        /// The startup check: runs CheckForUpdatesAsync only when IsUpdateCheckDue; otherwise returns no outcome.
+        /// </summary>
+        public async Task<IReadOnlyList<DownloadOutcome>> CheckForUpdatesIfDueAsync(IList<string> warnings, CancellationToken cancellation)
+        {
+            AppSettings current = settings.Load(warnings);
+            if (!IsUpdateCheckDue(current.LastUpdateCheckUtc, utcNow()))
+            {
+                return new DownloadOutcome[0];
+            }
+            return await CheckForUpdatesAsync(warnings, cancellation).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Downloads the latest build of every cached architecture (never one that was not cached) to a temporary
+        /// file and compares its SHA-256 with the cached file's. A different build waits as openvr_api.dll.new until
+        /// AcceptPendingUpdate. The check time is recorded only when every architecture was checked without error,
+        /// so a failed check is retried at the next startup.
+        /// </summary>
+        public async Task<IReadOnlyList<DownloadOutcome>> CheckForUpdatesAsync(IList<string> warnings, CancellationToken cancellation)
+        {
+            var outcomes = new List<DownloadOutcome>();
+            if (!IsLicenseAccepted(warnings))
+            {
+                return outcomes;
+            }
+            IReadOnlyList<CachedBuild> builds = GetBuilds(warnings);
+            foreach (CachedBuild build in builds)
+            {
+                outcomes.Add(await CheckOneAsync(build, warnings, cancellation).ConfigureAwait(false));
+            }
+            if (builds.Count > 0 && outcomes.TrueForAll(o => o.Status != DownloadStatus.Failed))
+            {
+                RecordCheckTime(warnings);
+            }
+            return outcomes;
+        }
+
+        /// <summary>
+        /// Makes the waiting build the cached one. The .new file is checked again first (PE, architecture, and the
+        /// hash recorded when it was downloaded); a damaged one is discarded. Games are updated by phase 6.
+        /// </summary>
+        public DownloadOutcome AcceptPendingUpdate(OpenCompositeArch arch, IList<string> warnings)
+        {
+            Dictionary<string, CacheEntryDto> file = ReadCacheFile(warnings);
+            string pendingPath = PendingDllPath(arch);
+            CacheEntryDto entry;
+            if (!file.TryGetValue(ArchName(arch), out entry) || entry.PendingSha256 == null || !File.Exists(pendingPath))
+            {
+                return Failed(arch, "No new OpenComposite " + ArchName(arch) + " build is waiting.");
+            }
+            try
+            {
+                string problem = Validate(pendingPath, arch);
+                string actual = problem == null ? FileHash.Sha256(pendingPath) : null;
+                if (problem != null || !string.Equals(actual, entry.PendingSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    ClearPending(file, entry, arch);
+                    return Failed(arch, "The waiting OpenComposite " + ArchName(arch) + " build was damaged and was discarded. Check for an update again.");
+                }
+                AtomicFile.Replace(pendingPath, DllPath(arch));
+                entry.Sha256 = actual;
+                entry.DownloadedUtc = entry.PendingDownloadedUtc;
+                entry.SourceUrl = SourceUrl(arch);
+                ClearPending(file, entry, arch);
+                return new DownloadOutcome(arch, DownloadStatus.UpdateAccepted, "Now using the new OpenComposite " + ArchName(arch) + " build.");
+            }
+            catch (Exception e) when (IsDiskError(e))
+            {
+                return Failed(arch, "Could not switch to the new OpenComposite " + ArchName(arch) + " build: " + e.Message);
+            }
+        }
+
+        private async Task<DownloadOutcome> CheckOneAsync(CachedBuild build, IList<string> warnings, CancellationToken cancellation)
+        {
+            OpenCompositeArch arch = build.Arch;
+            FetchResult fetched = await FetchValidatedAsync(arch, cancellation).ConfigureAwait(false);
+            if (fetched.Error != null)
+            {
+                return Failed(arch, fetched.Error);
+            }
+            try
+            {
+                string latest = FileHash.Sha256(fetched.TempPath);
+                // Compared with the file itself, not only cache.json, so a stale record can never hide an update.
+                string current = FileHash.Sha256(build.DllPath);
+                Dictionary<string, CacheEntryDto> file = ReadCacheFile(warnings);
+                CacheEntryDto entry;
+                if (!file.TryGetValue(ArchName(arch), out entry))
+                {
+                    entry = new CacheEntryDto { DownloadedUtc = JsonFile.FormatUtc(build.DownloadedUtc), SourceUrl = SourceUrl(arch) };
+                    file[ArchName(arch)] = entry;
+                }
+                entry.Sha256 = current;
+
+                if (string.Equals(latest, current, StringComparison.Ordinal))
+                {
+                    // Upstream still serves the cached build; a waiting build it no longer serves is dropped.
+                    ClearPending(file, entry, arch);
+                    return new DownloadOutcome(arch, DownloadStatus.Unchanged, "OpenComposite " + ArchName(arch) + " is up to date.");
+                }
+
+                AtomicFile.Replace(fetched.TempPath, PendingDllPath(arch));
+                entry.PendingSha256 = latest;
+                entry.PendingDownloadedUtc = JsonFile.FormatUtc(utcNow());
+                WriteCacheFile(file);
+                return new DownloadOutcome(arch, DownloadStatus.UpdateFound, "A new OpenComposite " + ArchName(arch) + " build is available.");
+            }
+            catch (Exception e) when (IsDiskError(e))
+            {
+                return Failed(arch, "Could not store the new OpenComposite " + ArchName(arch) + " build: " + e.Message);
+            }
+            finally
+            {
+                AtomicFile.TryDelete(fetched.TempPath);
+            }
+        }
+
+        private void RecordCheckTime(IList<string> warnings)
+        {
+            try
+            {
+                AppSettings current = settings.Load(warnings);
+                current.LastUpdateCheckUtc = utcNow();
+                settings.Save(current);
+            }
+            catch (Exception e) when (IsDiskError(e))
+            {
+                warnings.Add("Could not save the OpenComposite check time: " + e.Message);
+            }
+        }
+
+        /// <summary>
+        /// Clears any waiting build for one architecture: deletes openvr_api.dll.new (a no-op if it is already
+        /// gone, as after AcceptPendingUpdate promotes it), blanks the pending fields, and persists cache.json.
+        /// The single place every "drop the pending update" path (an unchanged check, a damaged .new file, or a
+        /// successful accept) goes through, per F5.
+        /// </summary>
+        private void ClearPending(Dictionary<string, CacheEntryDto> file, CacheEntryDto entry, OpenCompositeArch arch)
+        {
+            AtomicFile.TryDelete(PendingDllPath(arch));
+            entry.PendingSha256 = null;
+            entry.PendingDownloadedUtc = null;
+            WriteCacheFile(file);
+        }
+
         private Dictionary<string, CacheEntryDto> ReadCacheFile(IList<string> warnings)
         {
             var entries = new Dictionary<string, CacheEntryDto>(StringComparer.OrdinalIgnoreCase);

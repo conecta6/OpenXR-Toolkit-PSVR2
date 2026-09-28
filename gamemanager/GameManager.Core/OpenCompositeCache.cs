@@ -447,20 +447,31 @@ namespace GameManager.Core
                 // or a disk error while saving the record) — the DLL is already the new build, but the file below
                 // never learned that. Recognize that state by the cached DLL's own hash instead of reporting
                 // "nothing waiting" and leaving the stale pending record (and a possibly wrong Sha256) behind.
+                string actualHash;
                 try
                 {
-                    if (string.Equals(FileHash.Sha256(DllPath(arch)), entry.PendingSha256, StringComparison.OrdinalIgnoreCase))
-                    {
-                        entry.Sha256 = entry.PendingSha256;
-                        entry.DownloadedUtc = entry.PendingDownloadedUtc;
-                        entry.SourceUrl = SourceUrl(arch);
-                        ClearPending(file, entry, arch);
-                        return new DownloadOutcome(arch, DownloadStatus.UpdateAccepted, "Now using the new OpenComposite " + ArchName(arch) + " build.");
-                    }
+                    actualHash = FileHash.Sha256(DllPath(arch));
                 }
                 catch (Exception e) when (IsDiskError(e))
                 {
                     return Failed(arch, "Could not switch to the new OpenComposite " + ArchName(arch) + " build: " + e.Message);
+                }
+                if (string.Equals(actualHash, entry.PendingSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    entry.Sha256 = entry.PendingSha256;
+                    entry.DownloadedUtc = entry.PendingDownloadedUtc;
+                    entry.SourceUrl = SourceUrl(arch);
+                    // The new build is already in place (that is why the .new file is gone): a failure saving
+                    // the record from here on must not say "could not switch", since it already did.
+                    try
+                    {
+                        ClearPending(file, entry, arch);
+                    }
+                    catch (Exception e) when (IsDiskError(e))
+                    {
+                        return Failed(arch, "The new OpenComposite " + ArchName(arch) + " build is in place, but the cache record could not be saved (" + e.Message + "). The next update check will repair it.");
+                    }
+                    return new DownloadOutcome(arch, DownloadStatus.UpdateAccepted, "Now using the new OpenComposite " + ArchName(arch) + " build.");
                 }
                 return Failed(arch, "No new OpenComposite " + ArchName(arch) + " build is waiting.");
             }
@@ -485,7 +496,7 @@ namespace GameManager.Core
                 }
                 catch (Exception e) when (IsDiskError(e))
                 {
-                    return Failed(arch, "Switched to the new OpenComposite " + ArchName(arch) + " build, but could not save the record (" + e.Message + "). This will be repaired the next time an update is accepted.");
+                    return Failed(arch, "Switched to the new OpenComposite " + ArchName(arch) + " build, but could not save the record (" + e.Message + "). The next update check will repair it.");
                 }
                 return new DownloadOutcome(arch, DownloadStatus.UpdateAccepted, "Now using the new OpenComposite " + ArchName(arch) + " build.");
             }

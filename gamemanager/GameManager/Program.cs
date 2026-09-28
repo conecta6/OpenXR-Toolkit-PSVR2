@@ -37,8 +37,15 @@ namespace GameManager
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            HttpDownloader.EnableModernTls();
+
             string compatibilityPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CompatibilityList.FileName);
-            Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader()), compatibilityPath));
+            AppDataPaths appData = AppDataPaths.ForCurrentUser();
+            using (var http = new HttpDownloader())
+            {
+                var openComposite = new OpenCompositeCache(appData, new SettingsStore(appData.SettingsFile), http, () => DateTime.UtcNow);
+                Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader()), compatibilityPath, openComposite));
+            }
         }
     }
 }

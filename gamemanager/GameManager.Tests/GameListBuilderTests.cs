@@ -170,6 +170,23 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void BuildFrom_ClassifierThrowsOperationCanceled_RethrowsInsteadOfSwallowing()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            steam.AddGame(steam.SteamRoot, 1, "A Game", "A Game");
+
+            // The per-game catch in ClassifyOne must not treat the classifier's own cancellation as an ordinary
+            // classification failure (which would report it as a warning and keep scanning).
+            Assert.ThrowsException<OperationCanceledException>(
+                () => GameListBuilder.BuildFrom(
+                    steam.SteamRoot,
+                    CompatibilityList.Empty,
+                    null,
+                    CancellationToken.None,
+                    installDir => throw new OperationCanceledException("classifier cancelled")));
+        }
+
+        [TestMethod]
         public void BuildFrom_CancelledToken_ThrowsOperationCanceled()
         {
             steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));

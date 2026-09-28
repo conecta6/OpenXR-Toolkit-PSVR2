@@ -32,7 +32,8 @@ using GameManager.Core;
 namespace GameManager
 {
     /// <summary>
-    /// List of installed Steam games with their type and compatibility. Built in code: no designer file, no resources.
+    /// List of installed Steam games with their type and compatibility, plus the OpenComposite cache controls.
+    /// Built in code: no designer file, no resources.
     /// </summary>
     public sealed class MainForm : Form
     {
@@ -42,12 +43,22 @@ namespace GameManager
         private readonly Label statusLabel;
         private readonly ListView gameList;
         private readonly TextBox warningsBox;
+        private readonly OpenCompositeBar openCompositeBar;
+
+        // F4: OpenComposite warnings live in their own list and are re-appended after every scan, so Refresh
+        // (which rebuilds warningsBox.Text from the scan's own warnings) never erases them.
+        private readonly List<string> openCompositeWarnings = new List<string>();
+        private IReadOnlyList<string> lastScanWarnings = new string[0];
         private CancellationTokenSource scanCancellation;
 
-        public MainForm(SteamLocator locator, string compatibilityPath)
+        public MainForm(SteamLocator locator, string compatibilityPath, OpenCompositeCache openComposite)
         {
             this.locator = locator ?? throw new ArgumentNullException(nameof(locator));
             this.compatibilityPath = compatibilityPath ?? throw new ArgumentNullException(nameof(compatibilityPath));
+            if (openComposite == null)
+            {
+                throw new ArgumentNullException(nameof(openComposite));
+            }
 
             Text = "Game Manager - OpenXR Toolkit PSVR2";
             Size = new Size(1200, 700);
@@ -90,15 +101,19 @@ namespace GameManager
                 WordWrap = false,
             };
 
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+            openCompositeBar = new OpenCompositeBar(openComposite, AddWarning);
+
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 75));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
             layout.Controls.Add(topBar, 0, 0);
-            layout.Controls.Add(gameList, 0, 1);
-            layout.Controls.Add(warningsLabel, 0, 2);
-            layout.Controls.Add(warningsBox, 0, 3);
+            layout.Controls.Add(openCompositeBar, 0, 1);
+            layout.Controls.Add(gameList, 0, 2);
+            layout.Controls.Add(warningsLabel, 0, 3);
+            layout.Controls.Add(warningsBox, 0, 4);
             Controls.Add(layout);
 
             Shown += OnShown;
@@ -108,6 +123,13 @@ namespace GameManager
         private async void OnShown(object sender, EventArgs e)
         {
             await ScanAsync();
+            if (IsDisposed)
+            {
+                return;
+            }
+            // After the scan, so the scan does not clear its warnings. At most once per 24 hours, and only when
+            // OpenComposite was downloaded before.
+            await openCompositeBar.StartupCheckAsync();
         }
 
         private async void OnRefreshClick(object sender, EventArgs e)
@@ -119,6 +141,17 @@ namespace GameManager
         {
             // R5: stop a running scan between two games instead of letting it walk the rest of the library.
             scanCancellation?.Cancel();
+            openCompositeBar.CancelPendingWork();
+        }
+
+        private void AddWarning(string line)
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            openCompositeWarnings.Add(line);
+            RenderWarnings();
         }
 
         private async Task ScanAsync()
@@ -131,7 +164,10 @@ namespace GameManager
                 refreshButton.Enabled = false;
                 statusLabel.Text = "Scanning…";
                 gameList.Items.Clear();
-                warningsBox.Clear();
+                // F4: only the scan's own warnings are cleared here; openCompositeWarnings survives and is
+                // re-appended by RenderWarnings, both here and in ShowResult below.
+                lastScanWarnings = new string[0];
+                RenderWarnings();
 
                 // Created on the UI thread, so its callback runs on the UI thread.
                 var progress = new Progress<string>(name =>
@@ -177,11 +213,24 @@ namespace GameManager
             }
         }
 
+        private void RenderWarnings()
+        {
+            var warnings = new List<string>(lastScanWarnings);
+            warnings.AddRange(openCompositeWarnings);
+            warningsBox.Text = string.Join(Environment.NewLine, warnings);
+        }
+
         private void ShowResult(GameListResult result, IReadOnlyList<string> listWarnings)
         {
+            if (IsDisposed)
+            {
+                return;
+            }
+
             var warnings = new List<string>(listWarnings);
             warnings.AddRange(result.Warnings);
-            warningsBox.Text = string.Join(Environment.NewLine, warnings);
+            lastScanWarnings = warnings;
+            RenderWarnings();
 
             if (result.SteamRoot == null)
             {

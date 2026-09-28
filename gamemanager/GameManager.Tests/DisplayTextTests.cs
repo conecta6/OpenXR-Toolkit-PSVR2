@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System;
 using GameManager.Core;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -84,6 +85,39 @@ namespace GameManager.Tests
                 "Listed as an anti-cheat game in compatibility.json. Anti-cheat files found: EasyAntiCheat. Notes: Ships EasyAntiCheat.",
                 DisplayText.CompatibilityDetails(CompatibilityVerdict.For(entry, new[] { "EasyAntiCheat" })));
             Assert.AreEqual("", DisplayText.CompatibilityDetails(CompatibilityVerdict.For(null, new string[0])));
+        }
+
+        [TestMethod]
+        public void OpenCompositeLicenseNotice_NamesLicenseAuthorsSourceAndLink()
+        {
+            string notice = DisplayText.OpenCompositeLicenseNotice;
+
+            StringAssert.Contains(notice, "GPLv3");
+            StringAssert.Contains(notice, "its own authors");
+            StringAssert.Contains(notice, "unmodified");
+            StringAssert.Contains(notice, "znix.xyz");
+            StringAssert.Contains(notice, "https://gitlab.com/znixian/OpenOVR");
+            Assert.AreEqual("https://gitlab.com/znixian/OpenOVR", DisplayText.OpenCompositeSourceUrl);
+        }
+
+        [TestMethod]
+        public void OpenCompositeSummary_NothingCached_SaysNotDownloaded()
+        {
+            Assert.AreEqual("OpenComposite: not downloaded", DisplayText.OpenCompositeSummary(new CachedBuild[0]));
+        }
+
+        [TestMethod]
+        public void OpenCompositeSummary_ListsBuildsAndPendingUpdate()
+        {
+            var builds = new[]
+            {
+                new CachedBuild(OpenCompositeArch.X64, @"C:\cache\x64\openvr_api.dll", "aa", new DateTime(2026, 9, 28, 10, 0, 0, DateTimeKind.Utc), "u", "bb", new DateTime(2026, 9, 30, 9, 0, 0, DateTimeKind.Utc)),
+                new CachedBuild(OpenCompositeArch.X86, @"C:\cache\x86\openvr_api.dll", "cc", null, "u", null, null),
+            };
+
+            Assert.AreEqual(
+                "OpenComposite: x64 downloaded 2026-09-28 (new build available), x86 downloaded (date unknown)",
+                DisplayText.OpenCompositeSummary(builds));
         }
     }
 }

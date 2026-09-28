@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace GameManager.Core
 {
@@ -92,6 +93,43 @@ namespace GameManager.Core
                 parts.Add("Notes: " + verdict.Notes);
             }
             return string.Join(" ", parts);
+        }
+
+        public const string OpenCompositeSourceUrl = "https://gitlab.com/znixian/OpenOVR";
+
+        /// <summary>
+        /// R13: shown before the first download. Kept in Core so a future overlay shows the same notice.
+        /// </summary>
+        public const string OpenCompositeLicenseNotice =
+            "OpenComposite is free software written and published by its own authors, not by OpenXR Toolkit PSVR2. "
+            + "It is licensed under the GNU General Public License version 3 or later (GPLv3).\r\n\r\n"
+            + "Game Manager downloads the unmodified OpenComposite DLLs directly from znix.xyz, the official download "
+            + "site. It does not bundle, mirror or change them.\r\n\r\n"
+            + "Source code and license: " + OpenCompositeSourceUrl;
+
+        /// <summary>
+        /// "OpenComposite: x64 downloaded 2026-09-28 (new build available), x86 downloaded 2026-09-28".
+        /// </summary>
+        public static string OpenCompositeSummary(IReadOnlyList<CachedBuild> builds)
+        {
+            if (builds.Count == 0)
+            {
+                return "OpenComposite: not downloaded";
+            }
+            var parts = new List<string>(builds.Count);
+            foreach (CachedBuild build in builds)
+            {
+                string date = build.DownloadedUtc.HasValue
+                    ? build.DownloadedUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    : "(date unknown)";
+                string part = OpenCompositeCache.ArchName(build.Arch) + " downloaded " + date;
+                if (build.HasPendingUpdate)
+                {
+                    part += " (new build available)";
+                }
+                parts.Add(part);
+            }
+            return "OpenComposite: " + string.Join(", ", parts);
         }
     }
 }

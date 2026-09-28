@@ -1,6 +1,7 @@
 # Game Manager — design
 
-Status: phases 1–2 implemented (read-only game list); phases 3–7 pending.
+Status: phases 1–4 implemented (game list, compatibility list and anti-cheat block, OpenComposite download and
+new-build check); phases 5–7 pending.
 
 ## Purpose
 
@@ -82,8 +83,16 @@ Core units, each with one purpose and testable on its own:
 | `PeReader` | Read the machine type of a PE file (DOS header → `e_lfanew` → `PE\0\0` → Machine: `0x14C` x86, `0x8664` x64, `0xAA64` ARM64) | nothing |
 | `GameClassifier` | Walk the install folder once; list every `openvr_api.dll` with its architecture; detect `openxr_loader.dll`; record anti-cheat markers (via `AntiCheatDetector`) found during the same walk; return a `GameClassification` | `PeReader`, `AntiCheatDetector`, file system |
 | `AntiCheatDetector` | Recognize anti-cheat files and folders by name (`EasyAntiCheat`, `EasyAntiCheat_EOS`, `BattlEye` folders; `EasyAntiCheat*.exe`/`.sys`/`.dll`, `start_protected_game.exe`, `BEService*.exe`, `BEClient*.dll` files) | nothing |
+| `CompatibilityList` | Load and parse `compatibility.json` (R6): rejects a wrong `"version"`, skips a duplicate AppID (anti-cheat wins), a null entry, an invalid AppID or an unknown status, each with a warning | `JsonFile` |
+| `CompatibilityVerdict` | Combine a compatibility list entry's status with the anti-cheat markers found during classification into one verdict (blocked / works / broken / untested) | nothing |
+| `AppDataPaths` | Resolve the per-user app-data root under `%LOCALAPPDATA%` and its subpaths (`settings.json`, the `opencomposite` folder); only `Program.cs` calls `ForCurrentUser` | nothing |
+| `SettingsStore` | Load and save `settings.json` (OpenComposite license acceptance and its timestamp, last update-check time) | `JsonFile` |
+| `FileHash` | SHA-256 of a file on disk | nothing |
+| `AtomicFile` / `JsonFile` | Atomic file replace and delete; DataContractJsonSerializer-based JSON read and write (BOM-less UTF-8, `UseSimpleDictionaryFormat`). The only place in Core allowed to call `File.Write*`/`Directory.CreateDirectory`-style APIs, besides `OpenCompositeCache` and `HttpDownloader` | file system |
+| `HttpDownloader` | Download a URL to a file over HTTPS; rejects a response body shorter than its declared Content-Length. The only source of network I/O in Core | `System.Net.Http` |
+| `OpenCompositeCache` | The per-user OpenComposite cache (R11–R14): download and validate a build, gate downloads on license acceptance, check upstream for a new build, and accept a pending update | `AppDataPaths`, `SettingsStore`, `HttpDownloader`, `FileHash`, `AtomicFile`, `JsonFile`, `PeReader` |
 
-Later phases add, in Core: `OpenCompositeCache`, `PatchPlanner`,
+Later phases add, in Core: `PatchPlanner`,
 `PatchExecutor`, `PatchStateStore`, `RunningGameGuard`.
 
 The UI only calls Core. The future overlay will be a second front end over the same Core, plus a settings
@@ -145,6 +154,10 @@ thread.
   downloading the latest DLL of each architecture (about 2.5 MB) to a temporary file and comparing its
   SHA-256 with the cached one. The check runs at startup and from a "Check for update" button; a download
   that fails or is not a valid PE of the expected architecture never replaces the cache.
+- Cache (phase 4): `%LOCALAPPDATA%\OpenXR-Toolkit-PSVR2\GameManager\opencomposite\{x64|x86}\openvr_api.dll`, with
+  `opencomposite\cache.json` recording each build's SHA-256, download time and source URL. A newer upstream build
+  found by the check waits as `openvr_api.dll.new` until the user accepts it. ARM64 is not offered (no upstream
+  build). The license acceptance and the last check time are kept in `settings.json` in the same folder.
 - License position: Game Manager never links to, bundles, mirrors or modifies OpenComposite. The user's
   machine downloads the unmodified binary directly from upstream, so GPLv3 distribution obligations fall on
   the upstream distributor, not on this MIT project. The app shows the GPLv3 notice and a link to the source

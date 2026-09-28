@@ -46,6 +46,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GitHub", "GitHub", "{3F9F66
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FW1FontWrapper", "external\FW1FontWrapper\FW1FontWrapper.vcxproj", "{9F62DB07-EA42-4388-82AB-E6FAA371F353}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "gamemanager", "gamemanager", "{DBE80158-9A0D-4715-B50B-7988FBF84B4B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameManager.Core", "gamemanager\GameManager.Core\GameManager.Core.csproj", "{5670FC09-7B98-49A3-83CE-4ECF9CE0B227}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameManager", "gamemanager\GameManager\GameManager.csproj", "{A847129E-833E-4362-AD06-50635BEDBC2D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameManager.Tests", "gamemanager\GameManager.Tests\GameManager.Tests.csproj", "{654F46B0-FDE7-41DB-9E67-C0E089C16921}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -71,6 +79,18 @@ Global
 		{9F62DB07-EA42-4388-82AB-E6FAA371F353}.Debug|x64.Build.0 = Debug|x64
 		{9F62DB07-EA42-4388-82AB-E6FAA371F353}.Release|x64.ActiveCfg = Release|x64
 		{9F62DB07-EA42-4388-82AB-E6FAA371F353}.Release|x64.Build.0 = Release|x64
+		{5670FC09-7B98-49A3-83CE-4ECF9CE0B227}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5670FC09-7B98-49A3-83CE-4ECF9CE0B227}.Debug|x64.Build.0 = Debug|Any CPU
+		{5670FC09-7B98-49A3-83CE-4ECF9CE0B227}.Release|x64.ActiveCfg = Release|Any CPU
+		{5670FC09-7B98-49A3-83CE-4ECF9CE0B227}.Release|x64.Build.0 = Release|Any CPU
+		{A847129E-833E-4362-AD06-50635BEDBC2D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A847129E-833E-4362-AD06-50635BEDBC2D}.Debug|x64.Build.0 = Debug|Any CPU
+		{A847129E-833E-4362-AD06-50635BEDBC2D}.Release|x64.ActiveCfg = Release|Any CPU
+		{A847129E-833E-4362-AD06-50635BEDBC2D}.Release|x64.Build.0 = Release|Any CPU
+		{654F46B0-FDE7-41DB-9E67-C0E089C16921}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{654F46B0-FDE7-41DB-9E67-C0E089C16921}.Debug|x64.Build.0 = Debug|Any CPU
+		{654F46B0-FDE7-41DB-9E67-C0E089C16921}.Release|x64.ActiveCfg = Release|Any CPU
+		{654F46B0-FDE7-41DB-9E67-C0E089C16921}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -78,6 +98,9 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{1E41057B-9167-4ED0-A3FA-6F2CA6B55922} = {387062F2-BCA2-4776-A414-B6DE41FC9E12}
 		{3F9F661B-0558-4FF0-862C-4D1920CC2782} = {387062F2-BCA2-4776-A414-B6DE41FC9E12}
+		{5670FC09-7B98-49A3-83CE-4ECF9CE0B227} = {DBE80158-9A0D-4715-B50B-7988FBF84B4B}
+		{A847129E-833E-4362-AD06-50635BEDBC2D} = {DBE80158-9A0D-4715-B50B-7988FBF84B4B}
+		{654F46B0-FDE7-41DB-9E67-C0E089C16921} = {DBE80158-9A0D-4715-B50B-7988FBF84B4B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {777B0DEC-4E36-4B64-BD29-1832B32A076B}

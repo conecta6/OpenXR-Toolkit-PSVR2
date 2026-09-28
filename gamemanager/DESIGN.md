@@ -69,7 +69,7 @@ gamemanager/
   GameManager.Core/     class library, no UI dependency — all logic
   GameManager/          WinForms executable — one UI over Core
   GameManager.Tests/    unit tests for Core
-  compatibility.json    shipped compatibility list (phase 3)
+  GameManager/compatibility.json   shipped compatibility list (phase 3), copied next to the exe
 ```
 
 Core units, each with one purpose and testable on its own:

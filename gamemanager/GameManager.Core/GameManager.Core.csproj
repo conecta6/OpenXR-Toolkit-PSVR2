@@ -12,4 +12,9 @@
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- DataContractJsonSerializer (R10): BCL only, no JSON NuGet package in the shipped app. -->
+    <Reference Include="System.Runtime.Serialization" />
+  </ItemGroup>
+
 </Project>

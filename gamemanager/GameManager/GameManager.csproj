@@ -24,4 +24,9 @@
     <ProjectReference Include="..\GameManager.Core\GameManager.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The shipped compatibility list is loaded from next to GameManager.exe (R6). -->
+    <None Update="compatibility.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

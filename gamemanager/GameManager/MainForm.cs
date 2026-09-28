@@ -52,7 +52,7 @@ namespace GameManager
             refreshButton = new Button { Text = "Refresh", AutoSize = true };
             refreshButton.Click += OnRefreshClick;
 
-            statusLabel = new Label { AutoSize = true, Margin = new Padding(8, 8, 3, 0) };
+            statusLabel = new Label { AutoSize = true, Margin = new Padding(8, 8, 3, 0), UseMnemonic = false };
 
             var topBar = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false };
             topBar.Controls.Add(refreshButton);

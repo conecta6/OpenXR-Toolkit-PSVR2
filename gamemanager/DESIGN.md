@@ -1,6 +1,6 @@
 # Game Manager — design
 
-Status: design under review. No code yet.
+Status: phases 1–2 implemented (read-only game list); phases 3–7 pending.
 
 ## Purpose
 

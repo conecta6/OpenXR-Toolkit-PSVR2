@@ -31,6 +31,8 @@ In scope (v1):
 6. On startup, detect patched games whose DLL was restored by a Steam update (hash comparison) and offer to
    re-patch them.
 7. Compatibility list in JSON (works / broken / anti-cheat). Anti-cheat games cannot be patched.
+8. OpenComposite updates: detect that upstream published a newer build than the cached one, and update every
+   patched game to it in one click.
 
 Out of scope for v1, but the architecture must allow it: a SteamVR dashboard overlay, in the same
 application, to adjust CAS and foveated rendering from inside VR.
@@ -123,6 +125,10 @@ thread.
   `BattlEye` folder or `BEService*.exe`). This ships before patching exists (phase 3).
 - `opencomposite.ini`: OpenComposite aborts on unknown keys, so the manager only writes keys from a fixed
   allow-list (initially `supersampleRatio`).
+- Updating OpenComposite in a patched game replaces only the OpenComposite DLL. The `.bak` file is the game's
+  original DLL and is never overwritten by an update. Before replacing, the manager checks that the current
+  DLL hash equals the OpenComposite hash it recorded for that game; if not (for example Steam restored the
+  original), the game is handled as "unpatched by an update" instead.
 
 ## OpenComposite: source and license
 
@@ -132,6 +138,10 @@ thread.
   - x86: `https://znix.xyz/OpenComposite/download.php?arch=x86&branch=openxr`
 - No checksums or signatures are published upstream, so the manager records the SHA-256 of what it
   downloads and installs, and verifies the PE architecture of each file before use.
+- No version number is published either (the DLLs carry no version resource). A new build is detected by
+  downloading the latest DLL of each architecture (about 2.5 MB) to a temporary file and comparing its
+  SHA-256 with the cached one. The check runs at startup and from a "Check for update" button; a download
+  that fails or is not a valid PE of the expected architecture never replaces the cache.
 - License position: Game Manager never links to, bundles, mirrors or modifies OpenComposite. The user's
   machine downloads the unmodified binary directly from upstream, so GPLv3 distribution obligations fall on
   the upstream distributor, not on this MIT project. The app shows the GPLv3 notice and a link to the source
@@ -144,9 +154,10 @@ Each phase ends with a stop for testing on a real library.
 1. **List games** — `VdfReader`, `SteamLocator`, `SteamLibraryScanner`; window listing name, AppID, folder.
 2. **Classify** — `PeReader`, `GameClassifier`; type and DLL architecture columns. Phases 1–2 are read-only.
 3. **Compatibility list and anti-cheat block** — `compatibility.json`, `AntiCheatDetector`.
-4. **Download OpenComposite** — cache folder, SHA-256 record, license notice.
+4. **Download OpenComposite** — cache folder, SHA-256 record, license notice, new-build check.
 5. **Patch and restore** — planner, executor, simulation mode, running-game guard, state store.
-6. **Post-update detection** — startup hash check and re-patch offer.
+6. **Post-update detection** — startup hash check and re-patch offer for games Steam unpatched, and
+   "Update all" when a new OpenComposite build is available.
 7. **Docs and release** — user guide, add the manager to the release ZIP, pull request.
 
 ## Testing

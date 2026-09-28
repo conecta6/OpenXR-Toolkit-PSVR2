@@ -62,5 +62,36 @@ namespace GameManager.Core
             }
             return string.Join("; ", parts);
         }
+
+        public static string Compatibility(CompatibilityVerdict verdict)
+        {
+            if (verdict.Blocked)
+            {
+                return "Anti-cheat — blocked";
+            }
+            return verdict.ListStatus switch
+            {
+                CompatibilityStatus.Works => "Works",
+                CompatibilityStatus.Broken => "Broken",
+                _ => "Untested",
+            };
+        }
+
+        /// <summary>
+        /// Tooltip text: why the game is blocked, then the list notes. "" when there is nothing to say.
+        /// </summary>
+        public static string CompatibilityDetails(CompatibilityVerdict verdict)
+        {
+            var parts = new List<string>(2);
+            if (verdict.Reason.Length > 0)
+            {
+                parts.Add(verdict.Reason);
+            }
+            if (verdict.Notes.Length > 0)
+            {
+                parts.Add("Notes: " + verdict.Notes);
+            }
+            return string.Join(" ", parts);
+        }
     }
 }

@@ -21,8 +21,10 @@
 // SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GameManager.Core;
@@ -30,19 +32,22 @@ using GameManager.Core;
 namespace GameManager
 {
     /// <summary>
-    /// Read-only list of installed Steam games. Built in code: no designer file, no resources.
+    /// List of installed Steam games with their type and compatibility. Built in code: no designer file, no resources.
     /// </summary>
     public sealed class MainForm : Form
     {
         private readonly SteamLocator locator;
+        private readonly string compatibilityPath;
         private readonly Button refreshButton;
         private readonly Label statusLabel;
         private readonly ListView gameList;
         private readonly TextBox warningsBox;
+        private CancellationTokenSource scanCancellation;
 
-        public MainForm(SteamLocator locator)
+        public MainForm(SteamLocator locator, string compatibilityPath)
         {
             this.locator = locator ?? throw new ArgumentNullException(nameof(locator));
+            this.compatibilityPath = compatibilityPath ?? throw new ArgumentNullException(nameof(compatibilityPath));
 
             Text = "Game Manager - OpenXR Toolkit PSVR2";
             Size = new Size(1200, 700);
@@ -65,12 +70,14 @@ namespace GameManager
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
+                ShowItemToolTips = true,
             };
             gameList.Columns.Add("Name", 220);
             gameList.Columns.Add("AppID", 80);
             gameList.Columns.Add("Type", 120);
-            gameList.Columns.Add("openvr_api.dll", 420);
-            gameList.Columns.Add("Folder", 320);
+            gameList.Columns.Add("Compatibility", 150);
+            gameList.Columns.Add("openvr_api.dll", 380);
+            gameList.Columns.Add("Folder", 300);
 
             var warningsLabel = new Label { Text = "Warnings", AutoSize = true, Margin = new Padding(3, 6, 3, 0) };
 
@@ -95,6 +102,7 @@ namespace GameManager
             Controls.Add(layout);
 
             Shown += OnShown;
+            FormClosing += OnFormClosing;
         }
 
         private async void OnShown(object sender, EventArgs e)
@@ -107,40 +115,81 @@ namespace GameManager
             await ScanAsync();
         }
 
+        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        {
+            // R5: stop a running scan between two games instead of letting it walk the rest of the library.
+            scanCancellation?.Cancel();
+        }
+
         private async Task ScanAsync()
         {
-            refreshButton.Enabled = false;
-            statusLabel.Text = "Scanning…";
-            gameList.Items.Clear();
-            warningsBox.Clear();
-
-            // Created on the UI thread, so its callback runs on the UI thread.
-            var progress = new Progress<string>(name => statusLabel.Text = "Scanning… " + name);
+            var cancellation = new CancellationTokenSource();
+            scanCancellation = cancellation;
+            var listWarnings = new List<string>();
             try
             {
-                GameListResult result = await Task.Run(() => GameListBuilder.Build(locator, progress));
-                ShowResult(result);
+                refreshButton.Enabled = false;
+                statusLabel.Text = "Scanning…";
+                gameList.Items.Clear();
+                warningsBox.Clear();
+
+                // Created on the UI thread, so its callback runs on the UI thread.
+                var progress = new Progress<string>(name =>
+                {
+                    if (!IsDisposed)
+                    {
+                        statusLabel.Text = "Scanning… " + name;
+                    }
+                });
+                CancellationToken token = cancellation.Token;
+                GameListResult result = await Task.Run(() =>
+                {
+                    // Read on every scan, so an edited compatibility.json takes effect on Refresh.
+                    CompatibilityList compatibility = CompatibilityList.Load(compatibilityPath, listWarnings);
+                    return GameListBuilder.Build(locator, compatibility, progress, token);
+                });
+                ShowResult(result, listWarnings);
+            }
+            catch (OperationCanceledException)
+            {
+                // The window is closing: there is nothing left to show.
             }
             catch (Exception ex)
             {
                 // async void handlers must not let exceptions escape: that would close the app.
-                statusLabel.Text = "Scan failed. Details below.";
-                warningsBox.Text = ex.ToString();
+                if (!IsDisposed)
+                {
+                    statusLabel.Text = "Scan failed. Details below.";
+                    warningsBox.Text = ex.ToString();
+                }
             }
             finally
             {
-                refreshButton.Enabled = true;
+                if (scanCancellation == cancellation)
+                {
+                    scanCancellation = null;
+                }
+                cancellation.Dispose();
+                if (!IsDisposed)
+                {
+                    refreshButton.Enabled = true;
+                }
             }
         }
 
-        private void ShowResult(GameListResult result)
+        private void ShowResult(GameListResult result, IReadOnlyList<string> listWarnings)
         {
+            var warnings = new List<string>(listWarnings);
+            warnings.AddRange(result.Warnings);
+            warningsBox.Text = string.Join(Environment.NewLine, warnings);
+
             if (result.SteamRoot == null)
             {
                 statusLabel.Text = "Steam was not found on this PC. Install Steam and start it once, then click Refresh.";
                 return;
             }
 
+            int blocked = 0;
             gameList.BeginUpdate();
             try
             {
@@ -149,8 +198,16 @@ namespace GameManager
                     var item = new ListViewItem(entry.Game.Name);
                     item.SubItems.Add(entry.Game.AppId.ToString(CultureInfo.InvariantCulture));
                     item.SubItems.Add(DisplayText.Kind(entry.Classification.Kind));
+                    item.SubItems.Add(DisplayText.Compatibility(entry.Compatibility));
                     item.SubItems.Add(DisplayText.OpenVrDlls(entry.Classification.OpenVrDlls));
                     item.SubItems.Add(entry.Game.InstallDir);
+                    item.ToolTipText = DisplayText.CompatibilityDetails(entry.Compatibility);
+                    if (entry.Compatibility.Blocked)
+                    {
+                        // R9: greyed out. Anti-cheat games will never get patch actions.
+                        item.ForeColor = SystemColors.GrayText;
+                        blocked++;
+                    }
                     gameList.Items.Add(item);
                 }
             }
@@ -159,9 +216,8 @@ namespace GameManager
                 gameList.EndUpdate();
             }
 
-            warningsBox.Text = string.Join(Environment.NewLine, result.Warnings);
             statusLabel.Text = result.Entries.Count + " games found in " + result.SteamRoot + ". "
-                + result.Warnings.Count + " warnings.";
+                + blocked + " blocked (anti-cheat). " + warnings.Count + " warnings.";
         }
     }
 }

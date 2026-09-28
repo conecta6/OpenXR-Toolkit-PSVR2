@@ -83,7 +83,7 @@ Core units, each with one purpose and testable on its own:
 | `GameClassifier` | Walk the install folder once; list every `openvr_api.dll` with its architecture; detect `openxr_loader.dll`; record anti-cheat markers (via `AntiCheatDetector`) found during the same walk; return a `GameClassification` | `PeReader`, `AntiCheatDetector`, file system |
 | `AntiCheatDetector` | Recognize anti-cheat files and folders by name (`EasyAntiCheat`, `EasyAntiCheat_EOS`, `BattlEye` folders; `EasyAntiCheat*.exe`/`.sys`/`.dll`, `start_protected_game.exe`, `BEService*.exe`, `BEClient*.dll` files) | nothing |
 
-Later phases add, in Core: `CompatibilityList`, `OpenCompositeCache`, `PatchPlanner`,
+Later phases add, in Core: `OpenCompositeCache`, `PatchPlanner`,
 `PatchExecutor`, `PatchStateStore`, `RunningGameGuard`.
 
 The UI only calls Core. The future overlay will be a second front end over the same Core, plus a settings

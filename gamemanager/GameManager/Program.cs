@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 using System;
+using System.IO;
 using System.Windows.Forms;
 using GameManager.Core;
 
@@ -36,7 +37,8 @@ namespace GameManager
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader())));
+            string compatibilityPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CompatibilityList.FileName);
+            Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader()), compatibilityPath));
         }
     }
 }

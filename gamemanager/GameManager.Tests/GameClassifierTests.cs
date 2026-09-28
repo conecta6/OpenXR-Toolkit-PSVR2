@@ -274,6 +274,21 @@ namespace GameManager.Tests
                 result.AntiCheatMarkers.ToArray());
         }
 
+        [TestMethod]
+        public void Classify_LinkedAntiCheatFolder_StillCountsAsAMarker()
+        {
+            temp.CreateDirectory("Outside");
+            if (!temp.TryCreateJunction(@"Game\EasyAntiCheat", temp.PathOf("Outside")))
+            {
+                Assert.Inconclusive("Could not create a directory junction with mklink /J on this machine.");
+            }
+
+            GameClassification result = GameClassifier.Classify(GameDir);
+
+            Assert.IsTrue(result.AntiCheatMarkers.Contains("EasyAntiCheat"));
+            Assert.IsTrue(result.Warnings.Any(w => w.StartsWith("Skipped link:")));
+        }
+
         private static bool CanList(string directory)
         {
             try

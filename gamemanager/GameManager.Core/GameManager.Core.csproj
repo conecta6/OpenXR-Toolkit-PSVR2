@@ -17,4 +17,9 @@
     <Reference Include="System.Runtime.Serialization" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Test seams (GameListBuilder's classifier delegate) stay internal. -->
+    <InternalsVisibleTo Include="GameManager.Tests" />
+  </ItemGroup>
+
 </Project>

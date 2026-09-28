@@ -26,14 +26,16 @@ namespace GameManager.Core
 {
     public sealed class GameEntry
     {
-        public GameEntry(SteamGame game, GameClassification classification)
+        public GameEntry(SteamGame game, GameClassification classification, CompatibilityVerdict compatibility)
         {
             Game = game;
             Classification = classification;
+            Compatibility = compatibility;
         }
 
         public SteamGame Game { get; }
         public GameClassification Classification { get; }
+        public CompatibilityVerdict Compatibility { get; }
     }
 
     public sealed class GameListResult

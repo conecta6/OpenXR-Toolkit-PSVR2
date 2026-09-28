@@ -23,6 +23,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using GameManager.Core;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Win32;
@@ -63,7 +64,7 @@ namespace GameManager.Tests
             GameListResult result;
             using (new FileStream(lockedDll, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
-                result = GameListBuilder.BuildFrom(steam.SteamRoot, progress);
+                result = GameListBuilder.BuildFrom(steam.SteamRoot, CompatibilityList.Empty, progress);
             }
 
             Assert.AreEqual(steam.SteamRoot, result.SteamRoot, true);
@@ -73,6 +74,7 @@ namespace GameManager.Tests
             Assert.AreEqual("Flat Game", result.Entries[1].Game.Name);
             Assert.AreEqual(GameKind.Unknown, result.Entries[1].Classification.Kind);
             Assert.AreEqual("Locked Game", result.Entries[2].Game.Name);
+            Assert.AreEqual(GameKind.OpenVr, result.Entries[2].Classification.Kind);
             Assert.AreEqual(PeMachine.Unknown, result.Entries[2].Classification.OpenVrDlls[0].Machine);
             Assert.AreEqual(1, result.Warnings.Count);
             StringAssert.StartsWith(result.Warnings[0], "Locked Game: ");
@@ -84,7 +86,7 @@ namespace GameManager.Tests
         {
             steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot, temp.PathOf("UnpluggedDrive")));
 
-            GameListResult result = GameListBuilder.BuildFrom(steam.SteamRoot);
+            GameListResult result = GameListBuilder.BuildFrom(steam.SteamRoot, CompatibilityList.Empty);
 
             Assert.AreEqual(0, result.Entries.Count);
             Assert.AreEqual(1, result.Warnings.Count);
@@ -92,9 +94,114 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void BuildFrom_AppliesCompatibilityListAndAntiCheatMarkers()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            steam.AddGame(steam.SteamRoot, 438100, "VRChat", "VRChat");
+            string beatSaber = steam.AddGame(steam.SteamRoot, 620980, "Beat Saber", "Beat Saber");
+            File.WriteAllBytes(Path.Combine(beatSaber, "openvr_api.dll"), PeFixture.Build(PeFixture.MachineX64));
+            string eacGame = steam.AddGame(steam.SteamRoot, 777, "EAC Game", "EAC Game");
+            Directory.CreateDirectory(Path.Combine(eacGame, "EasyAntiCheat"));
+            steam.AddGame(steam.SteamRoot, 1000, "Flat Game", "Flat Game");
+            var listWarnings = new List<string>();
+            CompatibilityList list = CompatibilityList.Parse(
+                "{ \"version\": 1, \"games\": [" +
+                " { \"appId\": 438100, \"name\": \"VRChat\", \"status\": \"anticheat\", \"notes\": \"EasyAntiCheat\" }," +
+                " { \"appId\": 620980, \"name\": \"Beat Saber\", \"status\": \"works\" }," +
+                " { \"appId\": 777, \"name\": \"EAC Game\", \"status\": \"works\" } ] }",
+                "test", listWarnings);
+
+            GameListResult result = GameListBuilder.BuildFrom(steam.SteamRoot, list);
+
+            Assert.AreEqual(0, listWarnings.Count);
+            Assert.AreEqual(4, result.Entries.Count);
+
+            GameEntry beat = result.Entries[0];
+            Assert.AreEqual("Beat Saber", beat.Game.Name);
+            Assert.AreEqual(CompatibilityStatus.Works, beat.Compatibility.ListStatus);
+            Assert.IsFalse(beat.Compatibility.Blocked);
+
+            // Listed as working, but ships anti-cheat files: the files win.
+            GameEntry eac = result.Entries[1];
+            Assert.AreEqual("EAC Game", eac.Game.Name);
+            Assert.IsTrue(eac.Compatibility.Blocked);
+            StringAssert.Contains(eac.Compatibility.Reason, "EasyAntiCheat");
+
+            GameEntry flat = result.Entries[2];
+            Assert.AreEqual("Flat Game", flat.Game.Name);
+            Assert.AreEqual(CompatibilityStatus.Untested, flat.Compatibility.ListStatus);
+            Assert.IsFalse(flat.Compatibility.Blocked);
+
+            // No anti-cheat files on disk, but listed as anti-cheat: the list wins.
+            GameEntry vrChat = result.Entries[3];
+            Assert.AreEqual("VRChat", vrChat.Game.Name);
+            Assert.AreEqual(CompatibilityStatus.AntiCheat, vrChat.Compatibility.ListStatus);
+            Assert.IsTrue(vrChat.Compatibility.Blocked);
+        }
+
+        [TestMethod]
+        public void BuildFrom_ClassifierThrowsForOneGame_OtherGamesStillListed()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            string beatSaber = steam.AddGame(steam.SteamRoot, 620980, "Beat Saber", "Beat Saber");
+            File.WriteAllBytes(Path.Combine(beatSaber, "openvr_api.dll"), PeFixture.Build(PeFixture.MachineX64));
+            steam.AddGame(steam.SteamRoot, 555, "Odd Game", "Odd Game");
+            steam.AddGame(steam.SteamRoot, 1000, "Flat Game", "Flat Game");
+
+            GameListResult result = GameListBuilder.BuildFrom(
+                steam.SteamRoot,
+                CompatibilityList.Empty,
+                null,
+                CancellationToken.None,
+                installDir => installDir.EndsWith(@"\Odd Game", StringComparison.OrdinalIgnoreCase)
+                    ? throw new InvalidOperationException("unexpected walk failure")
+                    : GameClassifier.Classify(installDir));
+
+            Assert.AreEqual(3, result.Entries.Count);
+            Assert.AreEqual(GameKind.OpenVr, result.Entries[0].Classification.Kind);
+            Assert.AreEqual(GameKind.Unknown, result.Entries[1].Classification.Kind);
+            GameEntry odd = result.Entries[2];
+            Assert.AreEqual("Odd Game", odd.Game.Name);
+            Assert.AreEqual(GameKind.Unknown, odd.Classification.Kind);
+            Assert.IsFalse(odd.Compatibility.Blocked);
+            Assert.AreEqual(1, result.Warnings.Count);
+            StringAssert.StartsWith(result.Warnings[0], "Odd Game: ");
+            StringAssert.Contains(result.Warnings[0], "unexpected walk failure");
+        }
+
+        [TestMethod]
+        public void BuildFrom_CancelledToken_ThrowsOperationCanceled()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            steam.AddGame(steam.SteamRoot, 620980, "Beat Saber", "Beat Saber");
+            var progress = new ListProgress();
+
+            Assert.ThrowsException<OperationCanceledException>(
+                () => GameListBuilder.BuildFrom(steam.SteamRoot, CompatibilityList.Empty, progress, new CancellationToken(true)));
+            Assert.AreEqual(0, progress.Reports.Count);
+        }
+
+        [TestMethod]
+        public void BuildFrom_CancelledDuringScan_StopsBeforeTheNextGame()
+        {
+            steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
+            steam.AddGame(steam.SteamRoot, 1, "A Game", "A Game");
+            steam.AddGame(steam.SteamRoot, 2, "B Game", "B Game");
+
+            using (var cancellation = new CancellationTokenSource())
+            {
+                var progress = new ListProgress(name => cancellation.Cancel());
+
+                Assert.ThrowsException<OperationCanceledException>(
+                    () => GameListBuilder.BuildFrom(steam.SteamRoot, CompatibilityList.Empty, progress, cancellation.Token));
+                CollectionAssert.AreEqual(new[] { "A Game" }, progress.Reports);
+            }
+        }
+
+        [TestMethod]
         public void Build_SteamNotFound_ReturnsNullRootAndNoEntries()
         {
-            GameListResult result = GameListBuilder.Build(new SteamLocator(new FakeRegistryReader()));
+            GameListResult result = GameListBuilder.Build(new SteamLocator(new FakeRegistryReader()), CompatibilityList.Empty);
 
             Assert.IsNull(result.SteamRoot);
             Assert.AreEqual(0, result.Entries.Count);
@@ -109,7 +216,7 @@ namespace GameManager.Tests
             steam.WriteLibraryFolders(SteamFixture.CurrentFormat(steam.SteamRoot));
             steam.AddGame(steam.SteamRoot, 620980, "Beat Saber", "Beat Saber");
 
-            GameListResult result = GameListBuilder.Build(new SteamLocator(registry));
+            GameListResult result = GameListBuilder.Build(new SteamLocator(registry), CompatibilityList.Empty);
 
             Assert.AreEqual(steam.SteamRoot, result.SteamRoot, true);
             Assert.AreEqual(1, result.Entries.Count);
@@ -117,11 +224,19 @@ namespace GameManager.Tests
 
         private sealed class ListProgress : IProgress<string>
         {
+            private readonly Action<string> onReport;
+
+            public ListProgress(Action<string> onReport = null)
+            {
+                this.onReport = onReport;
+            }
+
             public List<string> Reports { get; } = new List<string>();
 
             public void Report(string value)
             {
                 Reports.Add(value);
+                onReport?.Invoke(value);
             }
         }
     }

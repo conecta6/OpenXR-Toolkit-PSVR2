@@ -127,8 +127,9 @@ namespace GameManager
             {
                 return;
             }
-            // After the scan, so the scan does not clear its warnings. At most once per 24 hours, and only when
-            // OpenComposite was downloaded before.
+            // After the scan: lastScanWarnings and openCompositeWarnings are separate lists (F4), but running
+            // this after the scan keeps warnings from a startup check tidily below the scan's own warnings. At
+            // most once per 24 hours, and only when OpenComposite was downloaded before.
             await openCompositeBar.StartupCheckAsync();
         }
 
@@ -196,7 +197,11 @@ namespace GameManager
                 if (!IsDisposed)
                 {
                     statusLabel.Text = "Scan failed. Details below.";
-                    warningsBox.Text = ex.ToString();
+                    // F4: goes through lastScanWarnings/RenderWarnings, not a direct warningsBox.Text
+                    // assignment, so it does not erase openCompositeWarnings and is not itself erased by a
+                    // later AddWarning (e.g. the startup check that runs right after OnShown's failed scan).
+                    lastScanWarnings = new[] { ex.ToString() };
+                    RenderWarnings();
                 }
             }
             finally

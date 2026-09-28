@@ -161,8 +161,19 @@ namespace GameManager
 
         private async Task RunAsync(Func<List<string>, CancellationToken, Task<IReadOnlyList<DownloadOutcome>>> work, bool showResult)
         {
-            if (busy || IsDisposed)
+            if (IsDisposed)
             {
+                return;
+            }
+            if (busy)
+            {
+                // Can happen when the license dialog was shown (a nested message loop) and another operation,
+                // such as the startup check, started while it was up. Only user-triggered callers (showResult)
+                // need telling; a silent StartupCheckAsync colliding with itself cannot happen.
+                if (showResult)
+                {
+                    addWarning("Another OpenComposite operation is running; try again when it finishes.");
+                }
                 return;
             }
             busy = true;
@@ -175,7 +186,7 @@ namespace GameManager
             {
                 outcomes = await work(warnings, closing.Token);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (closing.IsCancellationRequested)
             {
                 // The window is closing.
                 return;

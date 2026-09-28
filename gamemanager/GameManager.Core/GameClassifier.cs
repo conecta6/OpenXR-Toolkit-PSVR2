@@ -28,7 +28,8 @@ using System.Security;
 namespace GameManager.Core
 {
     /// <summary>
-    /// Walks a game's install folder and classifies it as OpenVR, probable OpenXR, or unknown.
+    /// Walks a game's install folder once: classifies it as OpenVR, probable OpenXR, or unknown, and records
+    /// anti-cheat markers on the way.
     /// </summary>
     public static class GameClassifier
     {
@@ -39,6 +40,7 @@ namespace GameManager.Core
         {
             string root = PathUtil.NormalizeDirectory(installDir);
             var dlls = new List<OpenVrDll>();
+            var antiCheatMarkers = new List<string>();
             var warnings = new List<string>();
             bool hasOpenXrLoader = false;
 
@@ -53,6 +55,13 @@ namespace GameManager.Core
                 {
                     foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos())
                     {
+                        // Matched by name in this same walk (R2), and before the link check below, so a linked
+                        // EasyAntiCheat folder still counts.
+                        if (AntiCheatDetector.IsMarker(entry.Name, entry is DirectoryInfo))
+                        {
+                            antiCheatMarkers.Add(Relative(root, entry.FullName));
+                        }
+
                         if (entry is DirectoryInfo subDirectory)
                         {
                             // Junctions and symbolic links below the root: skip, to avoid loops and leaving the game.
@@ -87,6 +96,7 @@ namespace GameManager.Core
             }
 
             dlls.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
+            antiCheatMarkers.Sort(StringComparer.OrdinalIgnoreCase);
 
             GameKind kind;
             if (dlls.Count > 0)
@@ -101,7 +111,7 @@ namespace GameManager.Core
             {
                 kind = GameKind.Unknown;
             }
-            return new GameClassification(kind, dlls, hasOpenXrLoader, warnings);
+            return new GameClassification(kind, dlls, hasOpenXrLoader, antiCheatMarkers, warnings);
         }
 
         private static PeMachine ReadMachine(string path, List<string> warnings)

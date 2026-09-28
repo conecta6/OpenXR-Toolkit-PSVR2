@@ -63,6 +63,7 @@ namespace GameManager.Tests
             Assert.AreEqual(GameKind.Unknown, result.Kind);
             Assert.AreEqual(0, result.OpenVrDlls.Count);
             Assert.IsFalse(result.HasOpenXrLoader);
+            Assert.AreEqual(0, result.AntiCheatMarkers.Count);
             Assert.AreEqual(0, result.Warnings.Count);
         }
 
@@ -233,6 +234,44 @@ namespace GameManager.Tests
             Assert.AreEqual(GameKind.OpenVr, result.Kind);
             Assert.AreEqual(PeMachine.X64, result.OpenVrDlls[0].Machine);
             Assert.AreEqual(0, result.Warnings.Count);
+        }
+
+        [TestMethod]
+        public void Classify_AntiCheatMarkersInSubfoldersAnyCase_AreRecorded()
+        {
+            temp.WriteBytes(@"Game\Binaries\Win64\openvr_api.dll", PeFixture.Build(PeFixture.MachineX64));
+            temp.WriteText(@"Game\Binaries\Win64\EASYANTICHEAT_EOS\Settings.json", "{}");
+            temp.WriteText(@"Game\Binaries\Win64\EASYANTICHEAT_EOS\EasyAntiCheat_EOS_Setup.exe", "x");
+            temp.WriteText(@"Game\start_protected_game.exe", "x");
+            temp.WriteText(@"Game\EasyAntiCheat.txt", "not a marker");
+
+            GameClassification result = GameClassifier.Classify(GameDir);
+
+            Assert.AreEqual(GameKind.OpenVr, result.Kind);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    @"Binaries\Win64\EASYANTICHEAT_EOS",
+                    @"Binaries\Win64\EASYANTICHEAT_EOS\EasyAntiCheat_EOS_Setup.exe",
+                    "start_protected_game.exe",
+                },
+                result.AntiCheatMarkers.ToArray());
+            Assert.AreEqual(0, result.Warnings.Count);
+        }
+
+        [TestMethod]
+        public void Classify_BattlEyeMarkers_AreRecorded()
+        {
+            temp.WriteText(@"Game\BattlEye\BEClient_x64.dll", "x");
+            temp.WriteText(@"Game\bin\BEService_x64.exe", "x");
+            temp.WriteText(@"Game\bin\BEService.dll", "not a marker");
+
+            GameClassification result = GameClassifier.Classify(GameDir);
+
+            Assert.AreEqual(GameKind.Unknown, result.Kind);
+            CollectionAssert.AreEqual(
+                new[] { "BattlEye", @"BattlEye\BEClient_x64.dll", @"bin\BEService_x64.exe" },
+                result.AntiCheatMarkers.ToArray());
         }
 
         private static bool CanList(string directory)

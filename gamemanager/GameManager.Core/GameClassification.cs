@@ -54,17 +54,30 @@ namespace GameManager.Core
 
     public sealed class GameClassification
     {
-        public GameClassification(GameKind kind, IReadOnlyList<OpenVrDll> openVrDlls, bool hasOpenXrLoader, IReadOnlyList<string> warnings)
+        public GameClassification(
+            GameKind kind,
+            IReadOnlyList<OpenVrDll> openVrDlls,
+            bool hasOpenXrLoader,
+            IReadOnlyList<string> antiCheatMarkers,
+            IReadOnlyList<string> warnings)
         {
             Kind = kind;
             OpenVrDlls = openVrDlls;
             HasOpenXrLoader = hasOpenXrLoader;
+            AntiCheatMarkers = antiCheatMarkers;
             Warnings = warnings;
         }
 
         public GameKind Kind { get; }
         public IReadOnlyList<OpenVrDll> OpenVrDlls { get; }
         public bool HasOpenXrLoader { get; }
+
+        /// <summary>
+        /// Anti-cheat files and folders found, relative to the install folder, for example "EasyAntiCheat".
+        /// Empty when there is none. Any entry blocks the game.
+        /// </summary>
+        public IReadOnlyList<string> AntiCheatMarkers { get; }
+
         public IReadOnlyList<string> Warnings { get; }
     }
 }

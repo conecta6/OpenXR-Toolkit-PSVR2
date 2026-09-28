@@ -80,9 +80,10 @@ Core units, each with one purpose and testable on its own:
 | `SteamLocator` | Find the Steam install folder (registry `HKCU\Software\Valve\Steam\SteamPath`, then `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath`) | registry abstraction |
 | `SteamLibraryScanner` | Read `libraryfolders.vdf` (current and legacy formats) and every `appmanifest_*.acf`; return `SteamGame { AppId, Name, InstallDir }` | `VdfReader`, file system |
 | `PeReader` | Read the machine type of a PE file (DOS header → `e_lfanew` → `PE\0\0` → Machine: `0x14C` x86, `0x8664` x64, `0xAA64` ARM64) | nothing |
-| `GameClassifier` | Walk the install folder; list every `openvr_api.dll` with its architecture; detect `openxr_loader.dll`; return a `GameClassification` | `PeReader`, file system |
+| `GameClassifier` | Walk the install folder once; list every `openvr_api.dll` with its architecture; detect `openxr_loader.dll`; record anti-cheat markers (via `AntiCheatDetector`) found during the same walk; return a `GameClassification` | `PeReader`, `AntiCheatDetector`, file system |
+| `AntiCheatDetector` | Recognize anti-cheat files and folders by name (`EasyAntiCheat`, `EasyAntiCheat_EOS`, `BattlEye` folders; `EasyAntiCheat*.exe`/`.sys`/`.dll`, `start_protected_game.exe`, `BEService*.exe`, `BEClient*.dll` files) | nothing |
 
-Later phases add, in Core: `CompatibilityList`, `AntiCheatDetector`, `OpenCompositeCache`, `PatchPlanner`,
+Later phases add, in Core: `CompatibilityList`, `OpenCompositeCache`, `PatchPlanner`,
 `PatchExecutor`, `PatchStateStore`, `RunningGameGuard`.
 
 The UI only calls Core. The future overlay will be a second front end over the same Core, plus a settings
@@ -121,8 +122,10 @@ thread.
   `%LOCALAPPDATA%\OpenXR-Toolkit-PSVR2\GameManager\state.json`. On startup, a patched game whose current
   DLL hash equals the original hash again is reported as "unpatched by an update".
 - Anti-cheat: a game is blocked if the compatibility list marks it `anticheat`, or if its folder contains
-  known anti-cheat markers (`EasyAntiCheat` folder or `EasyAntiCheat*.exe`, `start_protected_game.exe`,
-  `BattlEye` folder or `BEService*.exe`). This ships before patching exists (phase 3).
+  known anti-cheat markers, matched by name ignoring case anywhere under the install folder during the same
+  single walk as classification: an `EasyAntiCheat`, `EasyAntiCheat_EOS` or `BattlEye` folder, or an
+  `EasyAntiCheat*.exe`/`.sys`/`.dll`, `start_protected_game.exe`, `BEService*.exe` or `BEClient*.dll` file.
+  This ships before patching exists (phase 3).
 - `opencomposite.ini`: OpenComposite aborts on unknown keys, so the manager only writes keys from a fixed
   allow-list (initially `supersampleRatio`).
 - Updating OpenComposite in a patched game replaces only the OpenComposite DLL. The `.bak` file is the game's

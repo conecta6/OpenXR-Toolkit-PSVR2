@@ -265,5 +265,157 @@ namespace GameManager.Tests
             Assert.AreEqual(DownloadStatus.Failed, outcome.Status);
             StringAssert.Contains(outcome.Message, "No new");
         }
+
+        /// <summary>
+        /// Fix round 1, Important finding: an earlier AcceptPendingUpdate call can be interrupted (crash, or a
+        /// disk error saving cache.json) right after AtomicFile.Replace already promoted the .new file to the
+        /// current DLL, leaving cache.json still recording Sha256=old build / PendingSha256=new build and no
+        /// .new file on disk. AcceptPendingUpdate must recognize that state from the DLL's own hash instead of
+        /// reporting "nothing waiting" (the file was, in fact, already switched).
+        /// </summary>
+        [TestMethod]
+        public async Task AcceptPendingUpdate_InterruptedAfterPromotingFile_RepairsCacheAndReportsAccepted()
+        {
+            await CacheBuildOneAsync();
+            now = Start.AddDays(2);
+            http.Respond = url => OpenCompositeFixture.Dll(PeFixture.MachineX64, 2);
+            await cache.CheckForUpdatesAsync(new List<string>(), CancellationToken.None);
+            string newHash = FileHash.Sha256(cache.PendingDllPath(OpenCompositeArch.X64));
+            // Simulate the interruption: copy .new over the DLL (as AtomicFile.Replace would have) and delete
+            // .new, but leave cache.json exactly as it was before the record was updated.
+            File.Copy(cache.PendingDllPath(OpenCompositeArch.X64), cache.DllPath(OpenCompositeArch.X64), true);
+            File.Delete(cache.PendingDllPath(OpenCompositeArch.X64));
+            var warnings = new List<string>();
+
+            DownloadOutcome outcome = cache.AcceptPendingUpdate(OpenCompositeArch.X64, warnings);
+
+            Assert.AreEqual(DownloadStatus.UpdateAccepted, outcome.Status);
+            Assert.AreEqual(newHash, FileHash.Sha256(cache.DllPath(OpenCompositeArch.X64)));
+            CachedBuild build = cache.GetBuilds(warnings)[0];
+            Assert.AreEqual(newHash, build.Sha256);
+            Assert.IsFalse(build.HasPendingUpdate);
+            Assert.AreEqual(0, warnings.Count);
+        }
+
+        /// <summary>
+        /// Fix round 1, item 1: RecordCheckTime must not call settings.Save when settings.Load itself already
+        /// warned (an unreadable or corrupt settings.json), because Save would then persist a fresh default
+        /// AppSettings and silently reset OpenCompositeLicenseAccepted to false. The settings file becomes
+        /// unreadable partway through the check (via a side effect of the fake download), after the license
+        /// gate at the start of CheckForUpdatesAsync already passed, so this exercises RecordCheckTime's own
+        /// Load call rather than the license gate.
+        /// </summary>
+        [TestMethod]
+        public async Task CheckForUpdates_SettingsBecomeUnreadableBeforeRecordingTime_DoesNotSaveOrResetSettings()
+        {
+            await CacheBuildOneAsync();
+            string settingsPath = settings.FilePath;
+            http.Respond = url =>
+            {
+                File.WriteAllText(settingsPath, "not json");
+                return OpenCompositeFixture.Dll(PeFixture.MachineX64, 1);
+            };
+            var warnings = new List<string>();
+
+            IReadOnlyList<DownloadOutcome> outcomes = await cache.CheckForUpdatesAsync(warnings, CancellationToken.None);
+
+            Assert.AreEqual(DownloadStatus.Unchanged, outcomes[0].Status);
+            Assert.AreEqual("not json", File.ReadAllText(settingsPath));
+            Assert.IsTrue(warnings.Count > 0);
+        }
+
+        /// <summary>
+        /// Fix round 1, item 2: if the cache.json record for an architecture disappears between GetBuilds and
+        /// CheckOneAsync's own read of the file (edited or deleted from under us), CheckOneAsync must report
+        /// Failed instead of recreating the entry from an empty map, which would silently drop any other
+        /// architecture's record from the file it then writes back.
+        /// </summary>
+        [TestMethod]
+        public async Task CheckForUpdates_CacheRecordMissingMidCheck_ReturnsFailedWithoutRecreatingEntry()
+        {
+            await CacheBuildOneAsync();
+            string cacheJsonPath = cache.CacheFilePath;
+            http.Respond = url =>
+            {
+                File.WriteAllText(cacheJsonPath, "{}");
+                return OpenCompositeFixture.Dll(PeFixture.MachineX64, 2);
+            };
+            var warnings = new List<string>();
+
+            IReadOnlyList<DownloadOutcome> outcomes = await cache.CheckForUpdatesAsync(warnings, CancellationToken.None);
+
+            Assert.AreEqual(DownloadStatus.Failed, outcomes[0].Status);
+            StringAssert.Contains(outcomes[0].Message, "missing");
+            Assert.AreEqual("{}", File.ReadAllText(cacheJsonPath));
+        }
+
+        /// <summary>
+        /// Fix round 1, item 3(i): one architecture failing must keep the whole check from recording the
+        /// last-check time, even though the other architecture succeeded.
+        /// </summary>
+        [TestMethod]
+        public async Task CheckForUpdates_OneArchitectureFails_DoesNotRecordCheckTime()
+        {
+            settings.Save(new AppSettings { OpenCompositeLicenseAccepted = true });
+            http.Respond = url => OpenCompositeFixture.Dll(PeFixture.MachineX64, 1);
+            await cache.DownloadAsync(OpenCompositeArch.X64, new List<string>(), CancellationToken.None);
+            http.Respond = url => OpenCompositeFixture.Dll(PeFixture.MachineX86, 1);
+            await cache.DownloadAsync(OpenCompositeArch.X86, new List<string>(), CancellationToken.None);
+            http.RequestedUrls.Clear();
+            http.Respond = url => url.IndexOf("arch=x86", StringComparison.Ordinal) >= 0
+                ? throw new InvalidOperationException("Simulated network failure for x86.")
+                : OpenCompositeFixture.Dll(PeFixture.MachineX64, 1);
+            var warnings = new List<string>();
+
+            IReadOnlyList<DownloadOutcome> outcomes = await cache.CheckForUpdatesAsync(warnings, CancellationToken.None);
+
+            Assert.AreEqual(2, outcomes.Count);
+            Assert.AreEqual(OpenCompositeArch.X64, outcomes[0].Arch);
+            Assert.AreEqual(DownloadStatus.Unchanged, outcomes[0].Status);
+            Assert.AreEqual(OpenCompositeArch.X86, outcomes[1].Arch);
+            Assert.AreEqual(DownloadStatus.Failed, outcomes[1].Status);
+            Assert.IsNull(settings.Load(warnings).LastUpdateCheckUtc);
+        }
+
+        /// <summary>
+        /// Fix round 1, item 3(ii): an invalid download must leave an already-waiting pending update completely
+        /// untouched, not just the current build.
+        /// </summary>
+        [TestMethod]
+        public async Task CheckForUpdates_InvalidDownloadWithExistingPending_LeavesPendingIntact()
+        {
+            await CacheBuildOneAsync();
+            http.Respond = url => OpenCompositeFixture.Dll(PeFixture.MachineX64, 2);
+            await cache.CheckForUpdatesAsync(new List<string>(), CancellationToken.None);
+            string pendingHash = FileHash.Sha256(cache.PendingDllPath(OpenCompositeArch.X64));
+            http.Respond = url => OpenCompositeFixture.HtmlPage();
+            var warnings = new List<string>();
+
+            IReadOnlyList<DownloadOutcome> outcomes = await cache.CheckForUpdatesAsync(warnings, CancellationToken.None);
+
+            Assert.AreEqual(DownloadStatus.Failed, outcomes[0].Status);
+            Assert.IsTrue(File.Exists(cache.PendingDllPath(OpenCompositeArch.X64)));
+            Assert.AreEqual(pendingHash, FileHash.Sha256(cache.PendingDllPath(OpenCompositeArch.X64)));
+            CachedBuild build = cache.GetBuilds(warnings)[0];
+            Assert.IsTrue(build.HasPendingUpdate);
+            Assert.AreEqual(pendingHash, build.PendingSha256);
+        }
+
+        /// <summary>
+        /// Fix round 1, item 3(iii): license accepted but nothing cached yet must neither hit the network nor
+        /// record a check time (there is nothing to check).
+        /// </summary>
+        [TestMethod]
+        public async Task CheckForUpdates_NothingCached_NoRequestsOrCheckTime()
+        {
+            settings.Save(new AppSettings { OpenCompositeLicenseAccepted = true });
+            var warnings = new List<string>();
+
+            IReadOnlyList<DownloadOutcome> outcomes = await cache.CheckForUpdatesAsync(warnings, CancellationToken.None);
+
+            Assert.AreEqual(0, outcomes.Count);
+            Assert.AreEqual(0, http.RequestedUrls.Count);
+            Assert.IsNull(settings.Load(warnings).LastUpdateCheckUtc);
+        }
     }
 }

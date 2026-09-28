@@ -436,8 +436,32 @@ namespace GameManager.Core
             Dictionary<string, CacheEntryDto> file = ReadCacheFile(warnings);
             string pendingPath = PendingDllPath(arch);
             CacheEntryDto entry;
-            if (!file.TryGetValue(ArchName(arch), out entry) || entry.PendingSha256 == null || !File.Exists(pendingPath))
+            if (!file.TryGetValue(ArchName(arch), out entry) || entry.PendingSha256 == null)
             {
+                return Failed(arch, "No new OpenComposite " + ArchName(arch) + " build is waiting.");
+            }
+            if (!File.Exists(pendingPath))
+            {
+                // The .new file can be gone with cache.json still recording a pending update when an earlier
+                // AcceptPendingUpdate call was interrupted right after AtomicFile.Replace promoted it (a crash,
+                // or a disk error while saving the record) — the DLL is already the new build, but the file below
+                // never learned that. Recognize that state by the cached DLL's own hash instead of reporting
+                // "nothing waiting" and leaving the stale pending record (and a possibly wrong Sha256) behind.
+                try
+                {
+                    if (string.Equals(FileHash.Sha256(DllPath(arch)), entry.PendingSha256, StringComparison.OrdinalIgnoreCase))
+                    {
+                        entry.Sha256 = entry.PendingSha256;
+                        entry.DownloadedUtc = entry.PendingDownloadedUtc;
+                        entry.SourceUrl = SourceUrl(arch);
+                        ClearPending(file, entry, arch);
+                        return new DownloadOutcome(arch, DownloadStatus.UpdateAccepted, "Now using the new OpenComposite " + ArchName(arch) + " build.");
+                    }
+                }
+                catch (Exception e) when (IsDiskError(e))
+                {
+                    return Failed(arch, "Could not switch to the new OpenComposite " + ArchName(arch) + " build: " + e.Message);
+                }
                 return Failed(arch, "No new OpenComposite " + ArchName(arch) + " build is waiting.");
             }
             try
@@ -450,10 +474,19 @@ namespace GameManager.Core
                     return Failed(arch, "The waiting OpenComposite " + ArchName(arch) + " build was damaged and was discarded. Check for an update again.");
                 }
                 AtomicFile.Replace(pendingPath, DllPath(arch));
-                entry.Sha256 = actual;
-                entry.DownloadedUtc = entry.PendingDownloadedUtc;
-                entry.SourceUrl = SourceUrl(arch);
-                ClearPending(file, entry, arch);
+                // The DLL is now the new build regardless of what happens next: a failure from here on must not
+                // be reported as "could not switch", since it already did.
+                try
+                {
+                    entry.Sha256 = actual;
+                    entry.DownloadedUtc = entry.PendingDownloadedUtc;
+                    entry.SourceUrl = SourceUrl(arch);
+                    ClearPending(file, entry, arch);
+                }
+                catch (Exception e) when (IsDiskError(e))
+                {
+                    return Failed(arch, "Switched to the new OpenComposite " + ArchName(arch) + " build, but could not save the record (" + e.Message + "). This will be repaired the next time an update is accepted.");
+                }
                 return new DownloadOutcome(arch, DownloadStatus.UpdateAccepted, "Now using the new OpenComposite " + ArchName(arch) + " build.");
             }
             catch (Exception e) when (IsDiskError(e))
@@ -479,12 +512,15 @@ namespace GameManager.Core
                 CacheEntryDto entry;
                 if (!file.TryGetValue(ArchName(arch), out entry))
                 {
-                    entry = new CacheEntryDto { DownloadedUtc = JsonFile.FormatUtc(build.DownloadedUtc), SourceUrl = SourceUrl(arch) };
-                    file[ArchName(arch)] = entry;
+                    // The record for this architecture disappeared from cache.json since GetBuilds read it
+                    // (edited or deleted from under us). Recreating it here would write back only what
+                    // ReadCacheFile sees right now, silently dropping any other architecture's record that
+                    // still belongs in the same file.
+                    return Failed(arch, "The OpenComposite " + ArchName(arch) + " cache record is missing; download it again.");
                 }
                 entry.Sha256 = current;
 
-                if (string.Equals(latest, current, StringComparison.Ordinal))
+                if (string.Equals(latest, current, StringComparison.OrdinalIgnoreCase))
                 {
                     // Upstream still serves the cached build; a waiting build it no longer serves is dropped.
                     ClearPending(file, entry, arch);
@@ -511,7 +547,15 @@ namespace GameManager.Core
         {
             try
             {
+                int warningsBeforeLoad = warnings.Count;
                 AppSettings current = settings.Load(warnings);
+                if (warnings.Count > warningsBeforeLoad)
+                {
+                    // Load already warned (an unreadable or corrupt settings.json gives defaults instead of
+                    // throwing): saving now would persist those defaults and silently reset
+                    // OpenCompositeLicenseAccepted. Leave the file alone; the next check retries.
+                    return;
+                }
                 current.LastUpdateCheckUtc = utcNow();
                 settings.Save(current);
             }

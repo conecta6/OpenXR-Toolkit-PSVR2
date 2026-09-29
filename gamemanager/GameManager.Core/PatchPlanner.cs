@@ -112,6 +112,227 @@ namespace GameManager.Core
             return plan.Build();
         }
 
+        /// <summary>
+        /// R23/R24: each game's status from its records and the files on disk, aligned with entries. Warns about a
+        /// patched DLL that is missing or was changed by someone else (no automatic action), and about records whose
+        /// game is not in the list (kept).
+        /// </summary>
+        public IReadOnlyList<GamePatchStatus> GetStatuses(IReadOnlyList<GameEntry> entries, IList<string> warnings)
+        {
+            if (entries == null)
+            {
+                throw new ArgumentNullException(nameof(entries));
+            }
+            if (warnings == null)
+            {
+                throw new ArgumentNullException(nameof(warnings));
+            }
+            Inputs inputs = LoadInputs(warnings);
+            IReadOnlyList<PatchRecord> allRecords = inputs.State.Records;
+            foreach (KeyValuePair<OpenCompositeArch, string> problem in inputs.CacheProblem)
+            {
+                // R34: without a usable cached DLL nothing can be "Update available"; say why.
+                warnings.Add(CacheProblemBlocker(OpenCompositeCache.ArchName(problem.Key), problem.Value));
+            }
+            Dictionary<OpenCompositeArch, string> cachedHash = inputs.CachedHash;
+
+            var matched = new HashSet<PatchRecord>();
+            var result = new List<GamePatchStatus>(entries.Count);
+            foreach (GameEntry entry in entries)
+            {
+                var records = new List<PatchRecord>();
+                var statuses = new List<PatchStatus>();
+                var details = new List<string>();
+                foreach (PatchRecord record in allRecords)
+                {
+                    if (matched.Contains(record) || !PathUtil.IsUnder(record.DllPath, entry.Game.InstallDir))
+                    {
+                        continue;
+                    }
+                    matched.Add(record);
+                    records.Add(record);
+                    PatchStatus status = EvaluateOnDisk(entry.Game, record, cachedHash, warnings);
+                    statuses.Add(status);
+                    details.Add(Relative(entry.Game.InstallDir, record.DllPath) + ": " + DisplayText.StatusText(status));
+                }
+                result.Add(new GamePatchStatus(entry, PatchStatusRules.Combine(statuses), records, statuses, details));
+            }
+            foreach (PatchRecord record in allRecords)
+            {
+                if (!matched.Contains(record))
+                {
+                    warnings.Add(record.GameName + ": Game Manager has a patch record for " + record.DllPath
+                        + ", but the game is not in the Steam list (uninstalled, or its library drive is not connected). The record is kept.");
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// R18: puts back the original of every recorded DLL of the game from openvr_api.dll.bak, checks it, then
+        /// deletes the backup and the opencomposite.ini Game Manager created. Allowed for a blocked game too, since it
+        /// removes OpenComposite. A current DLL that is neither the original nor a known OpenComposite build is kept as
+        /// openvr_api.dll.replaced-&lt;time&gt;, after a question (default No).
+        /// </summary>
+        public PatchPlan PlanRestore(GameEntry entry, IList<string> warnings)
+        {
+            if (entry == null)
+            {
+                throw new ArgumentNullException(nameof(entry));
+            }
+            if (warnings == null)
+            {
+                throw new ArgumentNullException(nameof(warnings));
+            }
+            var plan = new PlanBuilder(PatchOperation.Restore, entry.Game);
+            Inputs inputs = LoadInputs(warnings);
+            List<PatchRecord> records = RecordsOf(inputs.State, entry.Game);
+            if (records.Count == 0)
+            {
+                plan.Blockers.Add("Game Manager has no record of patching this game, so there is nothing to restore.");
+                return plan.Build();
+            }
+            var inisPlanned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (PatchRecord record in records)
+            {
+                PlanRestoreDll(plan, entry.Game, record, inputs, inisPlanned);
+            }
+            return plan.Build();
+        }
+
+        private static PatchStatus EvaluateOnDisk(SteamGame game, PatchRecord record, Dictionary<OpenCompositeArch, string> cachedHash, IList<string> warnings)
+        {
+            if (!File.Exists(record.DllPath))
+            {
+                warnings.Add(game.Name + ": " + record.DllPath + " is missing. Its patch record is kept; Restore puts the original back from openvr_api.dll.bak if that is still there.");
+                return PatchStatus.ChangedExternally;
+            }
+            string current;
+            try
+            {
+                current = FileHash.Sha256(record.DllPath);
+            }
+            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+            {
+                warnings.Add(game.Name + ": could not read " + record.DllPath + " to check it (" + e.Message + ").");
+                return PatchStatus.ChangedExternally;
+            }
+            string cached;
+            cachedHash.TryGetValue(record.Arch, out cached);
+            PatchStatus status = PatchStatusRules.Evaluate(record, current, cached);
+            if (status == PatchStatus.ChangedExternally)
+            {
+                // R24: no automatic action, only a warning.
+                warnings.Add(game.Name + ": " + record.DllPath + " was changed by a Steam update or another program; it is neither the original nor the OpenComposite build Game Manager installed. Nothing was done.");
+            }
+            return status;
+        }
+
+        private static void PlanRestoreDll(PlanBuilder plan, SteamGame game, PatchRecord record, Inputs inputs, HashSet<string> inisPlanned)
+        {
+            string dllPath = record.DllPath;
+            string bakPath = dllPath + BackupSuffix;
+            string relative = Relative(game.InstallDir, dllPath);
+            string current;
+            string bakHash;
+            try
+            {
+                current = File.Exists(dllPath) ? FileHash.Sha256(dllPath) : null;
+                bakHash = File.Exists(bakPath) ? FileHash.Sha256(bakPath) : null;
+            }
+            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+            {
+                plan.Blockers.Add(relative + " could not be read (" + e.Message + "). Close the game and try again.");
+                return;
+            }
+
+            if (bakHash != null && !Same(bakHash, record.OriginalSha256))
+            {
+                plan.Blockers.Add(relative + ": openvr_api.dll.bak has changed since Game Manager patched the game, so it may no longer be the original. Nothing is restored; use Steam's \"Verify integrity of game files\" instead.");
+                return;
+            }
+            if (bakHash == null && current != null && !Same(current, record.OriginalSha256))
+            {
+                plan.Blockers.Add(relative + ": openvr_api.dll.bak is missing, so the game's original DLL cannot be put back. Use Steam's \"Verify integrity of game files\" to restore it.");
+                return;
+            }
+
+            // The executor's pre-flight only checks the leading VerifyHash steps: every existing file this change
+            // reads or replaces (the DLL, then the backup) is checked first.
+            var actions = new List<PatchAction>();
+            if (current != null)
+            {
+                actions.Add(PatchAction.Verify(dllPath, current));
+            }
+            if (bakHash != null)
+            {
+                actions.Add(PatchAction.Verify(bakPath, bakHash));
+            }
+            if (bakHash == null)
+            {
+                plan.Notes.Add(current == null
+                    ? relative + ": neither the DLL nor its backup is there any more; only the patch record is removed."
+                    : relative + ": this is already the game's original DLL; only the patch record is removed.");
+            }
+            else
+            {
+                if (current == null)
+                {
+                    actions.Add(PatchAction.Restore(bakPath, dllPath, record.OriginalSha256));
+                    actions.Add(PatchAction.Verify(dllPath, record.OriginalSha256));
+                }
+                else if (Same(current, record.OriginalSha256))
+                {
+                    // A Steam update already put the original back; the backup is now a duplicate.
+                    plan.Notes.Add(relative + ": Steam already put the original back; only the backup is removed.");
+                }
+                else
+                {
+                    if (!inputs.KnownOpenComposite.Contains(current))
+                    {
+                        // R18: neither the original nor a known OpenComposite build (R36: any known build restores
+                        // without a question): ask (default No) and keep that file under another name first.
+                        string aside = UniqueAside(dllPath + ".replaced-", inputs.Stamp);
+                        plan.Confirmations.Add(relative + " is neither the game's original nor an OpenComposite build Game Manager knows (a Steam update or another tool may have changed it). If you continue, it is kept as "
+                            + Path.GetFileName(aside) + " and the original from openvr_api.dll.bak is put back.");
+                        actions.Add(PatchAction.Backup(dllPath, aside));
+                        actions.Add(PatchAction.Verify(aside, current));
+                    }
+                    actions.Add(PatchAction.Restore(bakPath, dllPath, record.OriginalSha256));
+                    actions.Add(PatchAction.Verify(dllPath, record.OriginalSha256));
+                }
+                // Only after the DLL is verified to be the recorded original (leading check or the step above).
+                actions.Add(PatchAction.Delete(bakPath, record.OriginalSha256));
+            }
+            AddIniDelete(actions, record, inisPlanned);
+            plan.Changes.Add(new DllChange(dllPath, actions, null, true));
+        }
+
+        private static void AddIniDelete(List<PatchAction> actions, PatchRecord record, HashSet<string> inisPlanned)
+        {
+            // R18: only an opencomposite.ini Game Manager created is deleted.
+            if (!record.IniCreated)
+            {
+                return;
+            }
+            string iniPath = Path.Combine(Path.GetDirectoryName(record.DllPath), OpenCompositeIni.FileName);
+            if (inisPlanned.Add(iniPath) && File.Exists(iniPath))
+            {
+                actions.Add(PatchAction.Delete(iniPath, null));
+            }
+        }
+
+        private static List<PatchRecord> RecordsOf(PatchState state, SteamGame game)
+        {
+            return state.Records.Where(r => PathUtil.IsUnder(r.DllPath, game.InstallDir)).ToList();
+        }
+
+        private static string Relative(string installDir, string path)
+        {
+            string prefix = installDir.EndsWith("\\", StringComparison.Ordinal) ? installDir : installDir + "\\";
+            return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? path.Substring(prefix.Length) : path;
+        }
+
         private void PlanPatchDll(PlanBuilder plan, SteamGame game, string relativePath, PatchOptions options, Inputs inputs, HashSet<string> inisPlanned)
         {
             string dllPath = Path.Combine(game.InstallDir, relativePath);
@@ -221,12 +442,7 @@ namespace GameManager.Core
                 {
                     // R17: a backup that differs from the current DLL (an earlier manual install, an older game
                     // version). Ask first (default No); if the user goes on, it is kept under another name.
-                    string aside = bakPath + ".old-" + inputs.Stamp;
-                    for (int n = 2; File.Exists(aside); n++)
-                    {
-                        // A second patch within the same second: never collide with a file kept earlier.
-                        aside = bakPath + ".old-" + inputs.Stamp + "-" + n.ToString(CultureInfo.InvariantCulture);
-                    }
+                    string aside = UniqueAside(bakPath + ".old-", inputs.Stamp);
                     plan.Confirmations.Add(relativePath + ": an openvr_api.dll.bak already exists and differs from the current DLL (for example from an earlier manual install or an older version of the game). If you continue, it is kept as "
                         + Path.GetFileName(aside) + " and the current DLL becomes the backup.");
                     actions.Add(PatchAction.Verify(bakPath, bakHash));
@@ -345,6 +561,20 @@ namespace GameManager.Core
                 inputs.KnownOpenComposite.Add(record.OpenCompositeSha256);
             }
             return inputs;
+        }
+
+        /// <summary>
+        /// prefix + stamp, or prefix + stamp + "-2", "-3"... when that file exists: a second operation within the same
+        /// second never collides with a file kept earlier.
+        /// </summary>
+        private static string UniqueAside(string prefix, string stamp)
+        {
+            string aside = prefix + stamp;
+            for (int n = 2; File.Exists(aside); n++)
+            {
+                aside = prefix + stamp + "-" + n.ToString(CultureInfo.InvariantCulture);
+            }
+            return aside;
         }
 
         private static bool Same(string a, string b)

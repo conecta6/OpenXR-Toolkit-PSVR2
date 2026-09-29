@@ -202,5 +202,44 @@ namespace GameManager.Core
                     .Append(lines[i]);
             }
         }
+
+        /// <summary>
+        /// R23: the Status column.
+        /// </summary>
+        public static string StatusText(PatchStatus status)
+        {
+            return status switch
+            {
+                PatchStatus.Patched => "Patched",
+                PatchStatus.UnpatchedByUpdate => "Unpatched by update",
+                PatchStatus.UpdateAvailable => "Update available",
+                PatchStatus.ChangedExternally => "Changed externally",
+                _ => "Not patched",
+            };
+        }
+
+        /// <summary>
+        /// R24: the offer shown after a scan, or "" when there is nothing to offer.
+        /// </summary>
+        public static string PostUpdateSummary(IReadOnlyList<GamePatchStatus> statuses)
+        {
+            int unpatched = PatchBatch.Unpatched(statuses).Count;
+            int updatable = PatchBatch.Updatable(statuses).Count;
+            var parts = new List<string>(2);
+            if (unpatched > 0)
+            {
+                parts.Add(Counted(unpatched, "game was", "games were") + " unpatched by a Steam update: click \"Re-patch all unpatched\".");
+            }
+            if (updatable > 0)
+            {
+                parts.Add(Counted(updatable, "game can", "games can") + " get the new OpenComposite build: click \"Update all\".");
+            }
+            return string.Join(" ", parts);
+        }
+
+        private static string Counted(int count, string one, string many)
+        {
+            return count.ToString(CultureInfo.InvariantCulture) + " " + (count == 1 ? one : many);
+        }
     }
 }

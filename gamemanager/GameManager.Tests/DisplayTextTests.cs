@@ -150,5 +150,36 @@ namespace GameManager.Tests
                 "Restore Beat Saber (620980)" + nl + nl + "Not possible:" + nl + "- No backup.",
                 DisplayText.PlanSummary(blocked));
         }
+
+        [TestMethod]
+        public void StatusText_HasTheColumnTexts()
+        {
+            Assert.AreEqual("Not patched", DisplayText.StatusText(PatchStatus.NotPatched));
+            Assert.AreEqual("Patched", DisplayText.StatusText(PatchStatus.Patched));
+            Assert.AreEqual("Unpatched by update", DisplayText.StatusText(PatchStatus.UnpatchedByUpdate));
+            Assert.AreEqual("Update available", DisplayText.StatusText(PatchStatus.UpdateAvailable));
+            Assert.AreEqual("Changed externally", DisplayText.StatusText(PatchStatus.ChangedExternally));
+        }
+
+        [TestMethod]
+        public void PostUpdateSummary_CountsGamesToRepatchAndToUpdate()
+        {
+            var statuses = new[]
+            {
+                PatchStatusRulesTests.Status(PatchStatus.UnpatchedByUpdate),
+                PatchStatusRulesTests.Status(PatchStatus.UnpatchedByUpdate),
+                PatchStatusRulesTests.Status(PatchStatus.UpdateAvailable),
+            };
+
+            Assert.AreEqual(
+                "2 games were unpatched by a Steam update: click \"Re-patch all unpatched\". 1 game can get the new OpenComposite build: click \"Update all\".",
+                DisplayText.PostUpdateSummary(statuses));
+        }
+
+        [TestMethod]
+        public void PostUpdateSummary_NothingToOffer_IsEmpty()
+        {
+            Assert.AreEqual("", DisplayText.PostUpdateSummary(new[] { PatchStatusRulesTests.Status(PatchStatus.Patched) }));
+        }
     }
 }

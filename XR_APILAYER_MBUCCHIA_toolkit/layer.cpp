@@ -257,7 +257,7 @@ namespace {
             m_configManager->setDefault(config::SettingPostColorSpace, 0);
             m_configManager->setDefault(config::SettingPostHighlights, 1000);
             m_configManager->setDefault(config::SettingPostShadows, 0);
-            m_configManager->setDefault(config::SettingPostFakeHDR, 0);
+            m_configManager->setDefault(config::SettingPostFakeHDR, 1000);
             m_configManager->setDefault(config::SettingPostChromaticCorrectionR, 100090);
             m_configManager->setDefault(config::SettingPostChromaticCorrectionB, 99880);
 

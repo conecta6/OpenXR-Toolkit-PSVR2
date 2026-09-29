@@ -500,14 +500,52 @@ namespace GameManager.Tests
         [TestMethod]
         public void PlanPatch_BlockedByAnyOfSeveralDlls_KeepsNoChange()
         {
-            fx.WriteGameFile(@"aopenvr_api.dll", PatchFixture.OriginalDll(PeFixture.MachineX64, 1));
+            fx.WriteGameFile(@"x\openvr_api.dll", PatchFixture.OriginalDll(PeFixture.MachineX64, 1));
             fx.CacheOpenComposite(OpenCompositeArch.X64, 1);
-            fx.WriteGameFile(@"bopenvr_api.dll", PatchFixture.OriginalDll(0xAA64, 1));
+            fx.WriteGameFile(@"y\openvr_api.dll", PatchFixture.OriginalDll(0xAA64, 1));
 
             PatchPlan plan = PlanPatch(fx.Scan(), PatchOptions.None);
 
             Assert.IsFalse(plan.CanRun);
+            Assert.AreEqual(1, plan.Blockers.Count);
+            StringAssert.Contains(plan.Blockers[0], "an ARM64 DLL");
+            StringAssert.Contains(plan.Blockers[0], "cannot be patched");
             Assert.AreEqual(0, plan.Changes.Count);
+        }
+
+        [TestMethod]
+        public void PlanPatch_AlreadyOnCurrentBuildWithIni_VerifiesTheDllBeforeWritingTheIni()
+        {
+            string dll = WriteOriginalX64();
+            fx.CacheOpenComposite(OpenCompositeArch.X64, 1);
+            Assert.AreEqual(ApplyOutcome.Succeeded, fx.Service.Apply(PlanPatch(fx.Scan(), PatchOptions.None), false, false).Outcome);
+
+            PatchPlan again = PlanPatch(fx.Scan(), new PatchOptions(true, 1.25));
+
+            DllChange change = again.Changes.Single();
+            AssertLeadingVerifies(change, dll);
+            Assert.AreEqual(PatchActionKind.WriteIni, change.Actions.Last().Kind);
+            Assert.AreEqual(2, change.Actions.Count);
+            // Steam puts a different game DLL back: nothing is written and nothing is recorded as OpenComposite.
+            File.WriteAllBytes(dll, PatchFixture.OriginalDll(PeFixture.MachineX64, 5));
+            string before = fx.Snapshot();
+            Assert.AreEqual(ApplyOutcome.Failed, fx.Service.Apply(again, false, false).Outcome);
+            Assert.AreEqual(before, fx.Snapshot());
+        }
+
+        [TestMethod]
+        public void PlanPatch_AsideNameAlreadyTaken_UsesAnotherName()
+        {
+            string dll = WriteOriginalX64();
+            fx.WriteGameFile("openvr_api.dll.bak", PatchFixture.OriginalDll(PeFixture.MachineX64, 7));
+            fx.WriteGameFile("openvr_api.dll.bak.old-20260929-101500", PatchFixture.OriginalDll(PeFixture.MachineX64, 6));
+            fx.CacheOpenComposite(OpenCompositeArch.X64, 1);
+
+            PatchPlan plan = PlanPatch(fx.Scan(), PatchOptions.None);
+            ApplyResult result = fx.Service.Apply(plan, true, false);
+
+            Assert.AreEqual(ApplyOutcome.Succeeded, result.Outcome, result.Message);
+            Assert.IsTrue(File.Exists(dll + ".bak.old-20260929-101500-2"));
         }
     }
 }

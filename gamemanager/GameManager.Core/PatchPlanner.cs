@@ -54,7 +54,7 @@ namespace GameManager.Core
     }
 
     /// <summary>
-    /// Builds plans (R16). Reads the game folder, the OpenComposite cache and state.json; never writes. Hashes are
+    /// Builds plans (R16). Reads the game folder, the OpenComposite cache and state.json; never writes into game folders (loading a corrupt state.json may rename it in the app-data folder). Hashes are
     /// taken when the plan is built (at click time, not at scan time), and every file a step replaces is checked
     /// again by a VerifyHash step when the plan runs.
     /// </summary>
@@ -222,6 +222,11 @@ namespace GameManager.Core
                     // R17: a backup that differs from the current DLL (an earlier manual install, an older game
                     // version). Ask first (default No); if the user goes on, it is kept under another name.
                     string aside = bakPath + ".old-" + inputs.Stamp;
+                    for (int n = 2; File.Exists(aside); n++)
+                    {
+                        // A second patch within the same second: never collide with a file kept earlier.
+                        aside = bakPath + ".old-" + inputs.Stamp + "-" + n.ToString(CultureInfo.InvariantCulture);
+                    }
                     plan.Confirmations.Add(relativePath + ": an openvr_api.dll.bak already exists and differs from the current DLL (for example from an earlier manual install or an older version of the game). If you continue, it is kept as "
                         + Path.GetFileName(aside) + " and the current DLL becomes the backup.");
                     actions.Add(PatchAction.Verify(bakPath, bakHash));
@@ -241,6 +246,12 @@ namespace GameManager.Core
             {
                 actions.Add(ini);
                 iniCreated = true;
+            }
+            if (alreadyOurs && actions.Count > 0 && actions[0].Kind != PatchActionKind.VerifyHash)
+            {
+                // Only the ini is written: the DLL must still be checked first, or the record would hold the hash of
+                // whatever file is there (for example a game DLL Steam put back).
+                actions.Insert(0, PatchAction.Verify(dllPath, current));
             }
             if (alreadyOurs && actions.Count == 0)
             {

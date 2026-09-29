@@ -60,6 +60,8 @@ Changing FOV or Crop settings that affect resolution **requires restarting the g
 
 For native OpenXR games, the installed API layer can load automatically. OpenVR games require OpenComposite to route them through OpenXR. OpenComposite compatibility varies by game; this release does not claim universal OpenVR support. Consult the [OpenComposite project](https://gitlab.com/znixian/OpenOVR) for game-specific setup rather than replacing DLLs indiscriminately.
 
+The optional [Game Manager](gamemanager/README.md) (in the release ZIP as `GameManager\`) patches and restores your Steam OpenVR games with OpenComposite for you.
+
 ## Tested games
 
 **Only these games have been successfully tested so far:** BONELAB, Gunman Contracts, and COMPOUND Demo. Gunman Contracts was tested through native OpenXR; COMPOUND Demo was tested through OpenComposite. BONELAB was used for the benchmark below.

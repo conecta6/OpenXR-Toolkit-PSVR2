@@ -59,6 +59,9 @@ jobs:
       - name: Build unsigned x64 v1.0 layer
         shell: pwsh
         run: msbuild OpenXR-Toolkit.sln /t:XR_APILAYER_MBUCCHIA_toolkit /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v142
+      - name: Build Game Manager
+        shell: pwsh
+        run: msbuild OpenXR-Toolkit.sln /t:"gamemanager\GameManager" /m /p:Configuration=Release /p:Platform=x64
       - name: Stage v1.0 release files
         shell: pwsh
         run: |
@@ -94,6 +97,21 @@ jobs:
           Copy-Item -LiteralPath 'scripts/Uninstall.bat' -Destination $release
           Copy-Item -LiteralPath 'LICENSE' -Destination $release
           git rev-parse HEAD | Set-Content "$release/BUILD_COMMIT.txt"
+
+          $gmOut = 'gamemanager/GameManager/bin/Release/net472'
+          $gmRelease = "$release/GameManager"
+          New-Item -ItemType Directory -Path $gmRelease -Force | Out-Null
+          $gmFiles = @(
+            'GameManager.exe', 'GameManager.exe.config',
+            'GameManager.Core.dll', 'compatibility.json'
+          )
+          foreach ($file in $gmFiles) {
+            $source = Join-Path $gmOut $file
+            if (-not (Test-Path -LiteralPath $source)) { throw "Required Game Manager file missing: $file" }
+            Copy-Item -LiteralPath $source -Destination $gmRelease
+          }
+          if (-not (Test-Path -LiteralPath 'gamemanager/README.md')) { throw 'Required Game Manager file missing: README.md' }
+          Copy-Item -LiteralPath 'gamemanager/README.md' -Destination $gmRelease
       - uses: actions/upload-artifact@v4
         with:
           name: OpenXR-Toolkit-PSVR2-v1.0-x64

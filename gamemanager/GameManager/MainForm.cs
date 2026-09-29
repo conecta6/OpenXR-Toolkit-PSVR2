@@ -33,40 +33,58 @@ using GameManager.Core;
 namespace GameManager
 {
     /// <summary>
-    /// List of installed Steam games with their type and compatibility, plus the OpenComposite cache controls.
-    /// Built in code: no designer file, no resources.
+    /// List of installed Steam games with their type, compatibility and patch status, plus the OpenComposite row and
+    /// the patch row. Built in code: no designer file, no resources.
     /// </summary>
     public sealed class MainForm : Form
     {
+        private const int StatusColumn = 4;
+
         private readonly SteamLocator locator;
         private readonly string compatibilityPath;
+        private readonly PatchPlanner planner;
         private readonly Button refreshButton;
         private readonly Label statusLabel;
         private readonly ListView gameList;
         private readonly TextBox warningsBox;
         private readonly OpenCompositeBar openCompositeBar;
+        private readonly PatchBar patchBar;
 
-        // F4/R35: warnings from operations (OpenComposite now, patching later) live in their own de-duplicated log
-        // and are re-appended after every scan, so Refresh never erases them and repeats never pile up.
+        // F4/R35: warnings from operations live in their own de-duplicated log and are re-appended after every scan,
+        // so Refresh never erases them and repeats never pile up.
         private readonly WarningLog operationWarnings = new WarningLog();
 
         // R33: one operation at a time across every toolbar row.
         private readonly OperationGate gate = new OperationGate();
-        private IReadOnlyList<string> lastScanWarnings = new string[0];
-        private CancellationTokenSource scanCancellation;
 
-        public MainForm(SteamLocator locator, string compatibilityPath, OpenCompositeCache openComposite)
+        private IReadOnlyList<string> lastScanWarnings = new string[0];
+
+        // P3: warnings about patch statuses (a missing DLL, a changed one, a bad cache) describe the disk right now.
+        // They are replaced on every status read, never accumulated in operationWarnings.
+        private IReadOnlyList<string> statusWarnings = new string[0];
+        private IReadOnlyList<GameEntry> lastEntries = new GameEntry[0];
+        private IReadOnlyList<GamePatchStatus> lastStatuses = new GamePatchStatus[0];
+        private string scanSummary = "";
+        private CancellationTokenSource scanCancellation;
+        private bool statusRefreshWaitsForScan;
+
+        public MainForm(SteamLocator locator, string compatibilityPath, OpenCompositeCache openComposite, PatchPlanner planner, PatchService patchService)
         {
             this.locator = locator ?? throw new ArgumentNullException(nameof(locator));
             this.compatibilityPath = compatibilityPath ?? throw new ArgumentNullException(nameof(compatibilityPath));
+            this.planner = planner ?? throw new ArgumentNullException(nameof(planner));
             if (openComposite == null)
             {
                 throw new ArgumentNullException(nameof(openComposite));
             }
+            if (patchService == null)
+            {
+                throw new ArgumentNullException(nameof(patchService));
+            }
 
             Text = "Game Manager - OpenXR Toolkit PSVR2";
-            Size = new Size(1200, 700);
-            MinimumSize = new Size(700, 400);
+            Size = new Size(1280, 720);
+            MinimumSize = new Size(760, 420);
             StartPosition = FormStartPosition.CenterScreen;
 
             refreshButton = new Button { Text = "Refresh", AutoSize = true };
@@ -85,14 +103,17 @@ namespace GameManager
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
+                MultiSelect = false,
                 ShowItemToolTips = true,
             };
             gameList.Columns.Add("Name", 220);
-            gameList.Columns.Add("AppID", 80);
-            gameList.Columns.Add("Type", 120);
+            gameList.Columns.Add("AppID", 70);
+            gameList.Columns.Add("Type", 110);
             gameList.Columns.Add("Compatibility", 150);
-            gameList.Columns.Add("openvr_api.dll", 380);
-            gameList.Columns.Add("Folder", 300);
+            gameList.Columns.Add("Status", 130);
+            gameList.Columns.Add("openvr_api.dll", 330);
+            gameList.Columns.Add("Folder", 280);
+            gameList.SelectedIndexChanged += OnSelectionChanged;
 
             var warningsLabel = new Label { Text = "Warnings", AutoSize = true, Margin = new Padding(3, 6, 3, 0) };
 
@@ -106,8 +127,12 @@ namespace GameManager
             };
 
             openCompositeBar = new OpenCompositeBar(openComposite, gate, AddWarning, ShowNotice);
+            patchBar = new PatchBar(planner, patchService, gate, AddWarning, ShowNotice);
+            patchBar.StatusesChanged += OnStatusesChanged;
+            patchBar.RelaunchStarted += OnRelaunchStarted;
 
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 75));
@@ -115,9 +140,10 @@ namespace GameManager
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
             layout.Controls.Add(topBar, 0, 0);
             layout.Controls.Add(openCompositeBar, 0, 1);
-            layout.Controls.Add(gameList, 0, 2);
-            layout.Controls.Add(warningsLabel, 0, 3);
-            layout.Controls.Add(warningsBox, 0, 4);
+            layout.Controls.Add(patchBar, 0, 2);
+            layout.Controls.Add(gameList, 0, 3);
+            layout.Controls.Add(warningsLabel, 0, 4);
+            layout.Controls.Add(warningsBox, 0, 5);
             Controls.Add(layout);
 
             Shown += OnShown;
@@ -131,9 +157,8 @@ namespace GameManager
             {
                 return;
             }
-            // After the scan: lastScanWarnings and operationWarnings are separate lists (F4), but running
-            // this after the scan keeps warnings from a startup check tidily below the scan's own warnings. At
-            // most once per 24 hours, and only when OpenComposite was downloaded before.
+            // At most once per 24 hours, and only when OpenComposite was downloaded before. After the scan, so its
+            // warnings sit below the scan's own.
             await openCompositeBar.StartupCheckAsync();
         }
 
@@ -144,9 +169,23 @@ namespace GameManager
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
+            // P1: a Patch or Restore is planning or copying files. Closing now would cut the executor off in the middle
+            // of a plan, so the window stays until it finishes.
+            if (patchBar.IsOperationRunning)
+            {
+                e.Cancel = true;
+                ShowNotice("A patch or restore is running. Wait until it finishes, then close the window.");
+                return;
+            }
             // R5: stop a running scan between two games instead of letting it walk the rest of the library.
             scanCancellation?.Cancel();
             openCompositeBar.CancelPendingWork();
+        }
+
+        private void OnRelaunchStarted(object sender, EventArgs e)
+        {
+            // R22: an elevated copy is starting; this one closes so the two never write at the same time.
+            Close();
         }
 
         private void AddWarning(string line)
@@ -177,14 +216,19 @@ namespace GameManager
             var cancellation = new CancellationTokenSource();
             scanCancellation = cancellation;
             var listWarnings = new List<string>();
+            var scanStatusWarnings = new List<string>();
             try
             {
                 refreshButton.Enabled = false;
                 statusLabel.Text = "Scanning…";
                 gameList.Items.Clear();
-                // F4: only the scan's own warnings are cleared here; operationWarnings survives and is
-                // re-appended by RenderWarnings, both here and in ShowResult below.
+                lastEntries = new GameEntry[0];
+                lastStatuses = new GamePatchStatus[0];
+                patchBar.SetSelection(null, null);
+                // F4: only the scan's own warnings and the status warnings are cleared here; operationWarnings survives
+                // and is re-appended.
                 lastScanWarnings = new string[0];
+                statusWarnings = new string[0];
                 RenderWarnings();
 
                 // Created on the UI thread, so its callback runs on the UI thread.
@@ -196,13 +240,16 @@ namespace GameManager
                     }
                 });
                 CancellationToken token = cancellation.Token;
-                GameListResult result = await Task.Run(() =>
+                var (result, statuses) = await Task.Run(() =>
                 {
                     // Read on every scan, so an edited compatibility.json takes effect on Refresh.
                     CompatibilityList compatibility = CompatibilityList.Load(compatibilityPath, listWarnings);
-                    return GameListBuilder.Build(locator, compatibility, progress, token);
+                    GameListResult scanned = GameListBuilder.Build(locator, compatibility, progress, token);
+                    // R24: right after the scan, every patch record is checked against the file on disk.
+                    IReadOnlyList<GamePatchStatus> read = planner.GetStatuses(scanned.Entries, scanStatusWarnings);
+                    return (scanned, read);
                 });
-                ShowResult(result, listWarnings);
+                ShowResult(result, statuses, listWarnings, scanStatusWarnings);
             }
             catch (OperationCanceledException)
             {
@@ -214,9 +261,6 @@ namespace GameManager
                 if (!IsDisposed)
                 {
                     statusLabel.Text = "Scan failed. Details below.";
-                    // F4: goes through lastScanWarnings/RenderWarnings, not a direct warningsBox.Text
-                    // assignment, so it does not erase operationWarnings and is not itself erased by a
-                    // later AddWarning (e.g. the startup check that runs right after OnShown's failed scan).
                     lastScanWarnings = new[] { ex.ToString() };
                     RenderWarnings();
                 }
@@ -233,17 +277,24 @@ namespace GameManager
                     refreshButton.Enabled = true;
                 }
             }
+            if (statusRefreshWaitsForScan && !IsDisposed)
+            {
+                // A patch or restore finished while this scan was reading the disk, so its statuses may be stale.
+                statusRefreshWaitsForScan = false;
+                await RefreshStatusesAsync();
+            }
         }
 
         private void RenderWarnings()
         {
             var warnings = new List<string>(lastScanWarnings);
+            warnings.AddRange(statusWarnings);
             warnings.AddRange(operationWarnings.Items);
             // R35: a line reported both by the scan and by an operation is shown once.
             warningsBox.Text = string.Join(Environment.NewLine, warnings.Distinct());
         }
 
-        private void ShowResult(GameListResult result, IReadOnlyList<string> listWarnings)
+        private void ShowResult(GameListResult result, IReadOnlyList<GamePatchStatus> statuses, IReadOnlyList<string> listWarnings, IReadOnlyList<string> newStatusWarnings)
         {
             if (IsDisposed)
             {
@@ -253,11 +304,14 @@ namespace GameManager
             var warnings = new List<string>(listWarnings);
             warnings.AddRange(result.Warnings);
             lastScanWarnings = warnings;
+            statusWarnings = newStatusWarnings;
             RenderWarnings();
+            int warningCount = warnings.Count + newStatusWarnings.Count;
 
             if (result.SteamRoot == null)
             {
-                statusLabel.Text = "Steam was not found on this PC. Install Steam and start it once, then click Refresh.";
+                scanSummary = "Steam was not found on this PC. Install Steam and start it once, then click Refresh.";
+                ApplyStatuses(result.Entries, statuses);
                 return;
             }
 
@@ -265,18 +319,19 @@ namespace GameManager
             gameList.BeginUpdate();
             try
             {
-                foreach (GameEntry entry in result.Entries)
+                for (int i = 0; i < result.Entries.Count; i++)
                 {
-                    var item = new ListViewItem(entry.Game.Name);
+                    GameEntry entry = result.Entries[i];
+                    var item = new ListViewItem(entry.Game.Name) { Tag = i };
                     item.SubItems.Add(entry.Game.AppId.ToString(CultureInfo.InvariantCulture));
                     item.SubItems.Add(DisplayText.Kind(entry.Classification.Kind));
                     item.SubItems.Add(DisplayText.Compatibility(entry.Compatibility));
+                    item.SubItems.Add("");
                     item.SubItems.Add(DisplayText.OpenVrDlls(entry.Classification.OpenVrDlls));
                     item.SubItems.Add(entry.Game.InstallDir);
-                    item.ToolTipText = DisplayText.CompatibilityDetails(entry.Compatibility);
                     if (entry.Compatibility.Blocked)
                     {
-                        // R9: greyed out. Anti-cheat games will never get patch actions.
+                        // R9: greyed out. Anti-cheat games never get Patch.
                         item.ForeColor = SystemColors.GrayText;
                         blocked++;
                     }
@@ -288,8 +343,95 @@ namespace GameManager
                 gameList.EndUpdate();
             }
 
-            statusLabel.Text = result.Entries.Count + " games found in " + result.SteamRoot + ". "
-                + blocked + " blocked (anti-cheat). " + warnings.Count + " warnings.";
+            scanSummary = result.Entries.Count + " games found in " + result.SteamRoot + ". "
+                + blocked + " blocked (anti-cheat). " + warningCount + " warnings.";
+            ApplyStatuses(result.Entries, statuses);
+        }
+
+        /// <summary>
+        /// Shows statuses in the Status column and the tooltips, refreshes the status line and hands the selected
+        /// game to the patch row. Used after a scan and after an operation changed files.
+        /// </summary>
+        private void ApplyStatuses(IReadOnlyList<GameEntry> entries, IReadOnlyList<GamePatchStatus> statuses)
+        {
+            lastEntries = entries;
+            lastStatuses = statuses;
+            foreach (ListViewItem item in gameList.Items)
+            {
+                int index = (int)item.Tag;
+                item.SubItems[StatusColumn].Text = DisplayText.StatusText(statuses[index].Status);
+                item.ToolTipText = Tooltip(entries[index], statuses[index]);
+            }
+            statusLabel.Text = scanSummary;
+            OnSelectionChanged(this, EventArgs.Empty);
+        }
+
+        private static string Tooltip(GameEntry entry, GamePatchStatus status)
+        {
+            var parts = new List<string>();
+            string compatibility = DisplayText.CompatibilityDetails(entry.Compatibility);
+            if (compatibility.Length > 0)
+            {
+                parts.Add(compatibility);
+            }
+            parts.AddRange(status.Details);
+            return string.Join(Environment.NewLine, parts);
+        }
+
+        private void OnSelectionChanged(object sender, EventArgs e)
+        {
+            if (gameList.SelectedItems.Count == 1)
+            {
+                int index = (int)gameList.SelectedItems[0].Tag;
+                if (index < lastEntries.Count && index < lastStatuses.Count)
+                {
+                    patchBar.SetSelection(lastEntries[index], lastStatuses[index]);
+                    return;
+                }
+            }
+            patchBar.SetSelection(null, null);
+        }
+
+        private async void OnStatusesChanged(object sender, EventArgs e)
+        {
+            await RefreshStatusesAsync();
+        }
+
+        /// <summary>
+        /// Reads the patch statuses again after an operation. P3: does nothing while a scan runs (the scan owns the
+        /// list and reads the disk itself; it asks for one more read when it ends, in case it read too early).
+        /// </summary>
+        private async Task RefreshStatusesAsync()
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            if (scanCancellation != null)
+            {
+                statusRefreshWaitsForScan = true;
+                return;
+            }
+            IReadOnlyList<GameEntry> entries = lastEntries;
+            var warnings = new List<string>();
+            try
+            {
+                IReadOnlyList<GamePatchStatus> statuses = await Task.Run(() => planner.GetStatuses(entries, warnings));
+                // A scan that started meanwhile owns the list now.
+                if (IsDisposed || scanCancellation != null || !ReferenceEquals(entries, lastEntries))
+                {
+                    return;
+                }
+                ApplyStatuses(entries, statuses);
+                // Replaces the previous status warnings instead of adding to them.
+                statusWarnings = warnings;
+                RenderWarnings();
+            }
+            catch (Exception ex)
+            {
+                // async void handlers must not let exceptions escape: that would close the app.
+                AddWarning("Could not read the patch status: " + ex.Message);
+            }
         }
     }
 }

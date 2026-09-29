@@ -153,7 +153,7 @@ namespace GameManager.Core
                     records.Add(record);
                     PatchStatus status = EvaluateOnDisk(entry.Game, record, cachedHash, warnings);
                     statuses.Add(status);
-                    details.Add(Relative(entry.Game.InstallDir, record.DllPath) + ": " + DisplayText.StatusText(status));
+                    details.Add(PathUtil.Relative(entry.Game.InstallDir, record.DllPath) + ": " + DisplayText.StatusText(status));
                 }
                 result.Add(new GamePatchStatus(entry, PatchStatusRules.Combine(statuses), records, statuses, details));
             }
@@ -232,7 +232,7 @@ namespace GameManager.Core
         {
             string dllPath = record.DllPath;
             string bakPath = dllPath + BackupSuffix;
-            string relative = Relative(game.InstallDir, dllPath);
+            string relative = PathUtil.Relative(game.InstallDir, dllPath);
             string current;
             string bakHash;
             try
@@ -325,12 +325,6 @@ namespace GameManager.Core
         private static List<PatchRecord> RecordsOf(PatchState state, SteamGame game)
         {
             return state.Records.Where(r => PathUtil.IsUnder(r.DllPath, game.InstallDir)).ToList();
-        }
-
-        private static string Relative(string installDir, string path)
-        {
-            string prefix = installDir.EndsWith("\\", StringComparison.Ordinal) ? installDir : installDir + "\\";
-            return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? path.Substring(prefix.Length) : path;
         }
 
         private void PlanPatchDll(PlanBuilder plan, SteamGame game, string relativePath, PatchOptions options, Inputs inputs, HashSet<string> inisPlanned)

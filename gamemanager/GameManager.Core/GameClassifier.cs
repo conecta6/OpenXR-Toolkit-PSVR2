@@ -60,7 +60,7 @@ namespace GameManager.Core
                         // EasyAntiCheat folder still counts.
                         if (AntiCheatDetector.IsMarker(entry.Name, entry is DirectoryInfo))
                         {
-                            antiCheatMarkers.Add(Relative(root, entry.FullName));
+                            antiCheatMarkers.Add(PathUtil.Relative(root, entry.FullName));
                         }
 
                         if (entry is DirectoryInfo subDirectory)
@@ -82,7 +82,7 @@ namespace GameManager.Core
                             // (WOF) may mark a file as a reparse point, though user-mode code does not always see that
                             // bit on such a file. Either way, the file must still be read, or a compressed openvr_api.dll
                             // would be missed.
-                            dlls.Add(new OpenVrDll(Relative(root, entry.FullName), ReadMachine(entry.FullName, warnings)));
+                            dlls.Add(new OpenVrDll(PathUtil.Relative(root, entry.FullName), ReadMachine(entry.FullName, warnings)));
                         }
                         else if (string.Equals(entry.Name, OpenXrLoaderName, StringComparison.OrdinalIgnoreCase))
                         {
@@ -129,15 +129,6 @@ namespace GameManager.Core
                 warnings.Add("Could not read " + path + ": " + e.Message);
                 return PeMachine.Unknown;
             }
-        }
-
-        private static string Relative(string root, string fullPath)
-        {
-            if (fullPath.Length > root.Length && fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-            {
-                return fullPath.Substring(root.Length).TrimStart('\\');
-            }
-            return fullPath;
         }
     }
 }

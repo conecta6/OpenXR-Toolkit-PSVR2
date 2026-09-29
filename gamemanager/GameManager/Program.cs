@@ -30,7 +30,8 @@ namespace GameManager
     static class Program
     {
         /// <summary>
-        /// The main entry point for the application. Runs unelevated (no manifest, so asInvoker).
+        /// The main entry point for the application. Runs unelevated (no manifest, so asInvoker); the elevated
+        /// relaunch of R22 is only ever offered, from ElevatedRelaunch.
         /// </summary>
         [STAThread]
         static void Main()
@@ -41,10 +42,14 @@ namespace GameManager
 
             string compatibilityPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CompatibilityList.FileName);
             AppDataPaths appData = AppDataPaths.ForCurrentUser();
+            Func<DateTime> utcNow = () => DateTime.UtcNow;
             using (var http = new HttpDownloader())
             {
-                var openComposite = new OpenCompositeCache(appData, new SettingsStore(appData.SettingsFile), http, () => DateTime.UtcNow);
-                Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader()), compatibilityPath, openComposite));
+                var openComposite = new OpenCompositeCache(appData, new SettingsStore(appData.SettingsFile), http, utcNow);
+                var state = new PatchStateStore(appData.StateFile, utcNow);
+                var planner = new PatchPlanner(openComposite, state, utcNow);
+                var patchService = new PatchService(state, new RunningGameGuard(new WindowsProcessImageSource()), utcNow);
+                Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader()), compatibilityPath, openComposite, planner, patchService));
             }
         }
     }

@@ -160,6 +160,24 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void PlanRestore_BackupChangedAndDllMissing_IsBlockedAndNothingIsWritten()
+        {
+            string dll = PatchGame(PatchOptions.None);
+            File.Delete(dll);
+            File.WriteAllBytes(dll + ".bak", PatchFixture.OriginalDll(PeFixture.MachineX64, 9));
+            string before = fx.Snapshot();
+
+            PatchPlan plan = PlanRestore();
+            ApplyResult result = fx.Service.Apply(plan, false, false);
+
+            Assert.IsFalse(plan.CanRun);
+            Assert.IsTrue(plan.Blockers.Any(b => b.Contains("has changed since Game Manager patched")), string.Join("\n", plan.Blockers));
+            Assert.AreEqual(ApplyOutcome.NotRun, result.Outcome, result.Message);
+            Assert.AreEqual(before, fx.Snapshot());
+            Assert.IsNotNull(fx.FindRecord(dll));
+        }
+
+        [TestMethod]
         public void PlanRestore_SteamAlreadyPutTheOriginalBack_OnlyRemovesTheBackup()
         {
             string dll = PatchGame(PatchOptions.None);
@@ -246,7 +264,6 @@ namespace GameManager.Tests
             Assert.AreEqual(ApplyOutcome.Succeeded, result.Outcome, result.Message);
             CollectionAssert.AreEqual(original, File.ReadAllBytes(dll));
         }
-    
 
         /// <summary>
         /// The executor's pre-flight only checks the leading VerifyHash steps, so each restore change must open with a

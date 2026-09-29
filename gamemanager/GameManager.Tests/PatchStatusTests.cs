@@ -143,6 +143,36 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void GetStatuses_CachedDllFailsItsCheck_WarnsWhyNothingCanBeUpdateAvailable()
+        {
+            Patch();
+            File.WriteAllBytes(fx.Cache.DllPath(OpenCompositeArch.X64), new byte[] { 1, 2, 3 });
+            var warnings = new List<string>();
+
+            GamePatchStatus status = StatusOf(warnings);
+
+            Assert.AreEqual(PatchStatus.Patched, status.Status);
+            Assert.IsTrue(warnings.Any(w => w.Contains("failed its check")), string.Join("\n", warnings));
+        }
+
+        [TestMethod]
+        public void GetStatuses_DllCannotBeRead_IsChangedExternallyWithAWarning()
+        {
+            Patch();
+            var warnings = new List<string>();
+
+            GamePatchStatus status;
+            using (new FileStream(dll, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                status = StatusOf(warnings);
+            }
+
+            Assert.AreEqual(PatchStatus.ChangedExternally, status.Status);
+            Assert.IsTrue(warnings.Any(w => w.Contains("could not read")), string.Join("\n", warnings));
+            Assert.IsNotNull(fx.FindRecord(dll));
+        }
+
+        [TestMethod]
         public void GetStatuses_RecordForAGameNotInTheList_WarnsAndKeepsIt()
         {
             Patch();

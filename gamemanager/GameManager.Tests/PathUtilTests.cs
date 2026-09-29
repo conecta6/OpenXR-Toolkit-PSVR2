@@ -101,5 +101,17 @@ namespace GameManager.Tests
         {
             Assert.AreEqual(expected, PathUtil.IsUnder(path, folder));
         }
+
+        [TestMethod]
+        [DataRow(@"C:\Games\A\bin\game.exe", @"C:\Games\A", @"bin\game.exe")]
+        [DataRow(@"c:\games\a\OPENVR_API.DLL", @"C:\Games\A\", "OPENVR_API.DLL")]
+        [DataRow(@"E:\game.exe", @"E:\", "game.exe")]
+        [DataRow(@"C:\Games\A2\game.exe", @"C:\Games\A", @"C:\Games\A2\game.exe")]
+        [DataRow(@"C:\Games\A", @"C:\Games\A", @"C:\Games\A")]
+        [DataRow(@"D:\Other\x.dll", @"C:\Games\A", @"D:\Other\x.dll")]
+        public void Relative_ShortensOnlyRealSubPaths(string path, string root, string expected)
+        {
+            Assert.AreEqual(expected, PathUtil.Relative(root, path));
+        }
     }
 }

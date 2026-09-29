@@ -99,6 +99,21 @@ namespace GameManager.Core
         }
 
         /// <summary>
+        /// path relative to root ("C:\Games\A" + "C:\Games\A\bin\x.dll" gives "bin\x.dll"), ignoring case. Only a
+        /// real sub-path is shortened: the root itself, a sibling that shares a prefix ("A2") and a path elsewhere come
+        /// back unchanged.
+        /// </summary>
+        public static string Relative(string root, string path)
+        {
+            string prefix = root.EndsWith("\\", StringComparison.Ordinal) ? root : root + "\\";
+            if (path.Length > prefix.Length && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return path.Substring(prefix.Length);
+            }
+            return path;
+        }
+
+        /// <summary>
         /// Drops the Win32 device prefix: "\\?\C:\x" becomes "C:\x" and "\\?\UNC\server\share" becomes
         /// "\\server\share". Any other path is returned unchanged.
         /// </summary>

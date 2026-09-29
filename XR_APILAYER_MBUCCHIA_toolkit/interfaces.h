@@ -176,11 +176,13 @@ namespace toolkit {
         const std::string SettingPostExposure = "post_exposure";
         const std::string SettingPostSaturation = "post_saturation";
         const std::string SettingPostVibrance = "post_vibrance";
+        const std::string SettingPostColorSpace = "post_color_space";
         const std::string SettingPostColorGainR = "post_gain_r";
         const std::string SettingPostColorGainG = "post_gain_g";
         const std::string SettingPostColorGainB = "post_gain_b";
         const std::string SettingPostHighlights = "post_highlights";
         const std::string SettingPostShadows = "post_shadows";
+        const std::string SettingPostFakeHDR = "post_fake_hdr";
         const std::string SettingPostChromaticCorrectionR = "post_ca_r";
         const std::string SettingPostChromaticCorrectionB = "post_ca_b";
         const std::string SettingEyeTrackingEnabled = "eye_tracking";
@@ -215,6 +217,19 @@ namespace toolkit {
         enum class VariableShadingRateVal { R_x1, R_2x1, R_2x2, R_4x2, R_4x4, R_Cull, MaxValue };
         enum class PostProcessType { Off = 0, On, CACorrection, MaxValue };
         enum class PostSunGlassesType { None = 0, Light, Dark, Night, MaxValue };
+        enum class PostColorSpaceType {
+            Normal = 0,
+            Rec2020Vivid,
+            Rec2020Strong,
+            Rec2020Medium,
+            Rec2020Soft,
+            // Disabled for now, may come back later.
+            // P3Vivid,
+            // P3Soft,
+            // AdobeRGBVivid,
+            // AdobeRGBSoft,
+            MaxValue
+        };
         enum class FovModeType { Simple, Advanced, MaxValue };
         enum class ScreenshotFileFormat { DDS = 0, PNG, JPG, BMP, MaxValue };
         enum class BlindEye { None = 0, Left, Right, MaxValue };

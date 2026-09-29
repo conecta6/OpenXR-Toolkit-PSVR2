@@ -70,6 +70,7 @@ namespace {
             ZeroMemory(&desc, sizeof(desc));
             heapSize = desc.NumDescriptors = numDescriptors;
             desc.Type = type;
+            this->type = type;
             desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
             if (type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER || type == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) {
                 desc.Flags |= D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
@@ -82,11 +83,30 @@ namespace {
         }
 
         void allocate(D3D12_CPU_DESCRIPTOR_HANDLE& desc) {
-            assert((UINT)heapOffset < heapSize);
-            desc = CD3DX12_CPU_DESCRIPTOR_HANDLE(heapStartCPU, heapOffset++, descSize);
+            std::unique_lock lock(freeLock);
+
+            // Prefer never-used slots, so that a freed slot is reused as late as possible (the GPU may still be
+            // reading from a descriptor for a few frames after its owner is destroyed).
+            if ((UINT)heapOffset < heapSize) {
+                if (heapOffset % 64 == 0 || (UINT)heapOffset + 1 == heapSize) {
+                    Log("D3D12 descriptor heap (type %d) usage: %d/%u\n", (int)type, heapOffset + 1, heapSize);
+                }
+                desc = CD3DX12_CPU_DESCRIPTOR_HANDLE(heapStartCPU, heapOffset++, descSize);
+                return;
+            }
+            if (!freeSlots.empty()) {
+                desc = CD3DX12_CPU_DESCRIPTOR_HANDLE(heapStartCPU, freeSlots.front(), descSize);
+                freeSlots.pop_front();
+                return;
+            }
+            Log("D3D12 descriptor heap (type %d) is full: %d/%u\n", (int)type, heapOffset, heapSize);
+            throw std::runtime_error("D3D12 descriptor heap is full");
         }
 
-        // TODO: Implement freeing a descriptor
+        void free(D3D12_CPU_DESCRIPTOR_HANDLE desc) {
+            std::unique_lock lock(freeLock);
+            freeSlots.push_back((INT)((desc.ptr - heapStartCPU.ptr) / descSize));
+        }
 
         D3D12_GPU_DESCRIPTOR_HANDLE getGPUHandle(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle) const {
             INT64 offset = (cpuHandle.ptr - heapStartCPU.ptr) / descSize;
@@ -94,11 +114,14 @@ namespace {
         }
 
         UINT heapSize{0};
+        D3D12_DESCRIPTOR_HEAP_TYPE type{};
         ComPtr<ID3D12DescriptorHeap> heap;
         D3D12_CPU_DESCRIPTOR_HANDLE heapStartCPU;
         D3D12_GPU_DESCRIPTOR_HANDLE heapStartGPU;
         INT heapOffset{0};
         UINT descSize;
+        std::deque<INT> freeSlots;
+        std::mutex freeLock;
     };
 
     // Wrap shader resources, common code for root signature creation.
@@ -336,8 +359,12 @@ namespace {
                               public IRenderTargetView,
                               public IDepthStencilView {
       public:
-        D3D12ResourceView(std::shared_ptr<IDevice> device, D3D12_CPU_DESCRIPTOR_HANDLE resourceView)
-            : m_device(device), m_resourceView(resourceView) {
+        D3D12ResourceView(std::shared_ptr<IDevice> device, D3D12_CPU_DESCRIPTOR_HANDLE resourceView, D3D12Heap& heap)
+            : m_device(device), m_resourceView(resourceView), m_heap(heap) {
+        }
+
+        ~D3D12ResourceView() {
+            m_heap.free(m_resourceView);
         }
 
         Api getApi() const override {
@@ -355,6 +382,7 @@ namespace {
       private:
         const std::shared_ptr<IDevice> m_device;
         const D3D12_CPU_DESCRIPTOR_HANDLE m_resourceView;
+        D3D12Heap& m_heap;
     };
 
     // Wrap a texture resource. Obtained from D3D12Device.
@@ -609,7 +637,7 @@ namespace {
                 D3D12_CPU_DESCRIPTOR_HANDLE handle;
                 m_rvHeap.allocate(handle);
                 device->CreateShaderResourceView(get(m_texture), &desc, handle);
-                return std::make_shared<D3D12ResourceView>(m_device, handle);
+                return std::make_shared<D3D12ResourceView>(m_device, handle, m_rvHeap);
             }
             return nullptr;
         }
@@ -631,7 +659,7 @@ namespace {
                 D3D12_CPU_DESCRIPTOR_HANDLE handle;
                 m_rvHeap.allocate(handle);
                 device->CreateUnorderedAccessView(get(m_texture), nullptr, &desc, handle);
-                return std::make_shared<D3D12ResourceView>(m_device, handle);
+                return std::make_shared<D3D12ResourceView>(m_device, handle, m_rvHeap);
             }
             return nullptr;
         }
@@ -653,7 +681,7 @@ namespace {
                 D3D12_CPU_DESCRIPTOR_HANDLE handle;
                 m_rtvHeap.allocate(handle);
                 device->CreateRenderTargetView(get(m_texture), &desc, handle);
-                return std::make_shared<D3D12ResourceView>(m_device, handle);
+                return std::make_shared<D3D12ResourceView>(m_device, handle, m_rtvHeap);
             }
             return nullptr;
         }
@@ -675,7 +703,7 @@ namespace {
                 D3D12_CPU_DESCRIPTOR_HANDLE handle;
                 m_dsvHeap.allocate(handle);
                 device->CreateDepthStencilView(get(m_texture), &desc, handle);
-                return std::make_shared<D3D12ResourceView>(m_device, handle);
+                return std::make_shared<D3D12ResourceView>(m_device, handle, m_dsvHeap);
             }
             return nullptr;
         }
@@ -733,6 +761,12 @@ namespace {
                     ID3D12Resource* uploadBuffer = nullptr)
             : m_device(device), m_bufferDesc(bufferDesc), m_buffer(buffer), m_currentState(initialState),
               m_rvHeap(rvHeap), m_uploadBuffer(uploadBuffer) {
+        }
+
+        ~D3D12Buffer() {
+            if (m_constantBufferView) {
+                m_rvHeap.free(m_constantBufferView.value());
+            }
         }
 
         Api getApi() const override {
@@ -985,9 +1019,9 @@ namespace {
             }
 
             // Initialize the command lists and heaps.
-            m_rtvHeap.initialize(get(m_device), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 128);
-            m_dsvHeap.initialize(get(m_device), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 128);
-            m_rvHeap.initialize(get(m_device), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 128 + MaxModelBuffers);
+            m_rtvHeap.initialize(get(m_device), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 512);
+            m_dsvHeap.initialize(get(m_device), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 512);
+            m_rvHeap.initialize(get(m_device), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1024 + MaxModelBuffers);
             m_samplerHeap.initialize(get(m_device), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
             {
                 D3D12_QUERY_HEAP_DESC desc;

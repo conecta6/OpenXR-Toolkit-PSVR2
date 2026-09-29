@@ -38,10 +38,13 @@ namespace {
 
     struct alignas(16) ImageProcessorConfig {
         XrVector4f Params1; // Contrast, Brightness, Exposure, Saturation (-1..+1 params)
-        XrVector4f Params2; // ColorGainR, ColorGainG, ColorGainB (-1..+1 params)
+        XrVector4f Params2; // ColorGainR, ColorGainG, ColorGainB (-1..+1 params), FakeHDR (0..1 param)
         XrVector4f Params3; // Highlights, Shadows, Vibrance (0..1 params), UseCA (0 = off, 1 = on)
         XrVector4f Params4; // ChromaticCorrectionR, ChromaticCorrectionG, ChromaticCorrectionB (-1..+1 params)
                             // Eye (0 = left, 1 = right)
+        XrVector4f Params5; // ColorSpace matrix row 0 (linear RGB -> linear RGB), UseColorSpace (0 = off, 1 = on)
+        XrVector4f Params6; // ColorSpace matrix row 1
+        XrVector4f Params7; // ColorSpace matrix row 2
     };
 
     class ImageProcessor : public IImageProcessor {
@@ -124,14 +127,18 @@ namespace {
                        m_configManager->hasChanged(SettingPostVibrance) ||
                        m_configManager->hasChanged(SettingPostHighlights) ||
                        m_configManager->hasChanged(SettingPostShadows) ||
+                       m_configManager->hasChanged(SettingPostFakeHDR) ||
                        m_configManager->hasChanged(SettingPostColorGainR) ||
                        m_configManager->hasChanged(SettingPostColorGainG) ||
                        m_configManager->hasChanged(SettingPostColorGainB) ||
                        m_configManager->hasChanged(SettingPostChromaticCorrectionR) ||
-                       m_configManager->hasChanged(SettingPostChromaticCorrectionB);
+                       m_configManager->hasChanged(SettingPostChromaticCorrectionB) ||
+                       m_configManager->hasChanged(SettingPostColorSpace);
             } else {
                 return m_configManager->hasChanged(SettingPostColorGainR) ||
-                       m_configManager->hasChanged(SettingPostColorGainB);
+                       m_configManager->hasChanged(SettingPostColorGainB) ||
+                       m_configManager->hasChanged(SettingPostFakeHDR) ||
+                       m_configManager->hasChanged(SettingPostColorSpace);
             }
         }
 
@@ -148,7 +155,7 @@ namespace {
 
             static constexpr XMVECTORF32 kGainBias[3][2] = {
                 {{{{+2.0f, 1.6f, 6.0f, 2.0f}}}, {{{+1.0f, 0.8f, 3.0f, 1.0f}}}}, // ((v * 2) - 1)  -> [-1..+1]
-                {{{{+2.0f, 2.0f, 2.0f, 2.0f}}}, {{{+1.0f, 1.0f, 1.0f, 1.0f}}}}, // ((v * 2) - 1)  -> [-1..+1]
+                {{{{+2.0f, 2.0f, 2.0f, 1.0f}}}, {{{+1.0f, 1.0f, 1.0f, 0.0f}}}}, // ((v * 2) - 1)  -> [-1..+1] (w: [0..+1])
                 {{{{-1.0f, 0.5f, 1.0f, 1.0f}}}, {{{-1.0f, 0.0f, 0.0f, 0.0f}}}}, // ((v * 1) - 0)  -> [ 0..+1]
             };
 
@@ -161,6 +168,47 @@ namespace {
                 const auto param = XMVectorSaturate((XMLoadSInt4(&params[i]) + XMLoadSInt4(&preset[i])) * 0.001f);
                 StoreXrVector4(&m_config.Params1 + i, (param * kGainBias[i][0]) - kGainBias[i][1]);
             }
+
+            // Color space: reinterpret the linear input as if it was in another gamut, without color management.
+            // - vivid: the input is treated as the wider space and converted to Rec.709 (stretches the colors out)
+            // - strong: same as vivid, but blended three quarters of the way from the identity (Rec.2020 only)
+            // - medium: same as vivid, but blended halfway with the identity (Rec.2020 only)
+            // - soft:  the input is treated as Rec.709 and converted to the wider space (mutes the colors)
+            // The 4th component of the first row is the on/off flag (the matrix is ignored by the shader when off).
+            static constexpr XrVector4f kColorSpace[to_integral(PostColorSpaceType::MaxValue)][3] = {
+                {{1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 0.0f}}, // Normal
+                {{1.6605f, -0.5876f, -0.0728f, 1.0f},
+                 {-0.1246f, 1.1329f, -0.0083f, 0.0f},
+                 {-0.0182f, -0.1006f, 1.1187f, 0.0f}}, // Rec.2020 -> Rec.709
+                {{1.4954f, -0.4407f, -0.0546f, 1.0f},
+                 {-0.0935f, 1.0997f, -0.0062f, 0.0f},
+                 {-0.0136f, -0.0754f, 1.0890f, 0.0f}}, // Rec.2020 -> Rec.709, three quarters of the way from identity
+                {{1.3302f, -0.2938f, -0.0364f, 1.0f},
+                 {-0.0623f, 1.0665f, -0.0042f, 0.0f},
+                 {-0.0091f, -0.0503f, 1.0594f, 0.0f}}, // Rec.2020 -> Rec.709, halfway to identity
+                {{0.6274f, 0.3293f, 0.0433f, 1.0f},
+                 {0.0691f, 0.9195f, 0.0114f, 0.0f},
+                 {0.0164f, 0.0880f, 0.8956f, 0.0f}}, // Rec.709 -> Rec.2020
+                // Disabled for now, may come back later (re-enable together with PostColorSpaceType).
+                // {{1.2249f, -0.2249f, 0.0f, 1.0f},
+                //  {-0.0421f, 1.0421f, 0.0f, 0.0f},
+                //  {-0.0196f, -0.0786f, 1.0983f, 0.0f}}, // Display P3 (D65) -> Rec.709
+                // {{0.8225f, 0.1775f, 0.0f, 1.0f},
+                //  {0.0332f, 0.9668f, 0.0f, 0.0f},
+                //  {0.0171f, 0.0724f, 0.9105f, 0.0f}}, // Rec.709 -> Display P3 (D65)
+                // {{1.3984f, -0.3984f, 0.0f, 1.0f},
+                //  {0.0f, 1.0f, 0.0f, 0.0f},
+                //  {0.0f, -0.0429f, 1.0429f, 0.0f}}, // Adobe RGB (D65) -> Rec.709
+                // {{0.7151f, 0.2849f, 0.0f, 1.0f},
+                //  {0.0f, 1.0f, 0.0f, 0.0f},
+                //  {0.0f, 0.0412f, 0.9588f, 0.0f}}, // Rec.709 -> Adobe RGB (D65)
+            };
+
+            const auto colorSpace = static_cast<size_t>(
+                to_integral(m_configManager->getEnumValue<PostColorSpaceType>(SettingPostColorSpace)));
+            m_config.Params5 = kColorSpace[colorSpace][0];
+            m_config.Params6 = kColorSpace[colorSpace][1];
+            m_config.Params7 = kColorSpace[colorSpace][2];
 
             // CA Correction stuff.
             if (m_mode == PostProcessType::CACorrection) {
@@ -188,7 +236,7 @@ namespace {
                         XMINT4(configManager->getValue(SettingPostColorGainR + suffix),
                                configManager->getValue(SettingPostColorGainG + suffix),
                                configManager->getValue(SettingPostColorGainB + suffix),
-                               0),
+                               configManager->getValue(SettingPostFakeHDR + suffix)),
 
                         XMINT4(configManager->getValue(SettingPostHighlights + suffix),
                                configManager->getValue(SettingPostShadows + suffix),

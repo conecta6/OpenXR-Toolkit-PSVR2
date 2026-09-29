@@ -27,6 +27,12 @@ When Crop is first enabled, `Calibration pending` means the Toolkit is observing
 
 Native OpenXR games can load the installed layer automatically. OpenVR games require [OpenComposite](https://gitlab.com/znixian/OpenOVR); its compatibility varies by game. Avoid replacing game DLLs without checking that project's game-specific instructions.
 
+## Game Manager (optional)
+
+The `GameManager` folder in this ZIP contains Game Manager, a small Windows app that patches your Steam OpenVR games with [OpenComposite](https://gitlab.com/znixian/OpenOVR) and restores them in one click. It is not needed for native OpenXR games.
+
+It downloads OpenComposite (GPLv3) from its official site the first time you click Download; nothing from OpenComposite is included in this ZIP. Read `GameManager\README.md` first.
+
 ## Troubleshooting
 
 - **Menu missing:** confirm SteamVR is the active OpenXR runtime, the installation completed, and the extracted folder has not moved.

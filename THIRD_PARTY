@@ -493,6 +493,14 @@ SweetFX FakeHDR
     FakeHDR by Christian Cann Schuldt Jensen ~ CeeJay.dk
     https://github.com/CeeJayDK/SweetFX
 
+OpenComposite (not included)
+-----------------------------
+
+    Game Manager (gamemanager/) downloads OpenComposite, licensed under the GNU GPL version 3 or later,
+    at runtime from its official source (https://znix.xyz, source code at https://gitlab.com/znixian/OpenOVR).
+    It does not bundle, mirror, modify or redistribute OpenComposite, and this repository and its release
+    ZIP contain no OpenComposite binary.
+
 Miscellaneous
 --------------
 

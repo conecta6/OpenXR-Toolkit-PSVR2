@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>GameManager.Core</RootNamespace>
+    <AssemblyName>GameManager.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DataContractJsonSerializer (R10): BCL only, no JSON NuGet package in the shipped app. -->
+    <Reference Include="System.Runtime.Serialization" />
+    <!-- HttpClient (R12). Not an implicit SDK reference for .NET Framework. -->
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Test seams (GameListBuilder's classifier delegate, HttpDownloader's HttpMessageHandler/timeout
+         constructor) stay internal. -->
+    <InternalsVisibleTo Include="GameManager.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -22,3 +22,9 @@ Press **Ctrl+F2** in a compatible game to open the Toolkit menu. Enable **Eye tr
 With Crop enabled, `Calibration pending` means the Toolkit is recording the original FOV and using a linear estimate. Close the game normally and relaunch; `Exact` means saved calibration is used for tangent-based scaling. `Inactive` means Crop cannot apply under the current settings. Changing FOV or Crop settings that affect resolution requires a game restart. Some games ignore the recommended resolution, so inspect `[FOV-CROP]` and swapchain dimensions in the log to confirm a pixel reduction.
 
 The log is at `%LOCALAPPDATA%\OpenXR-Toolkit\logs\XR_APILAYER_MBUCCHIA_toolkit.log`. Look for `[PSVR2-DIAG]` when troubleshooting eye tracking. Hubris, Gunman Contracts, and COMPOUND Demo passed the v1.1 RC hardware regression tests on PSVR2; BONELAB was tested for the earlier benchmark. These results do not imply universal game compatibility.
+
+## Game Manager (optional)
+
+The `GameManager` folder in this ZIP contains Game Manager, a small Windows app that patches your Steam OpenVR games with [OpenComposite](https://gitlab.com/znixian/OpenOVR) and restores them in one click. It is not needed for native OpenXR games.
+
+It downloads OpenComposite (GPLv3) from its official site the first time you click Download; nothing from OpenComposite is included in this ZIP. Read `GameManager\README.md` first.

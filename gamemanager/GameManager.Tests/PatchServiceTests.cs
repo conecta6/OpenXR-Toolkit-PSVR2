@@ -20,8 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using GameManager.Core;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -86,6 +89,7 @@ namespace GameManager.Tests
             Assert.AreEqual(before, fx.Snapshot());
             Assert.IsFalse(File.Exists(fx.Paths.StateFile));
             StringAssert.Contains(result.Message, "Simulation");
+            StringAssert.Contains(result.Message, "nothing was written into any game folder");
             StringAssert.Contains(result.Message, "Back up " + dll);
             Assert.IsFalse(result.ChangedSomething);
         }
@@ -213,6 +217,103 @@ namespace GameManager.Tests
             Assert.AreEqual(before, fx.Snapshot());
             Assert.IsFalse(File.Exists(dll + ".bak"));
             Assert.IsNull(fx.FindRecord(dll));
+        }
+
+        [TestMethod]
+        public void Apply_IniWriteFailsAfterTheCopy_StillRecordsThePatchedDll()
+        {
+            string ini = fx.WriteGameFile("opencomposite.ini", System.Text.Encoding.ASCII.GetBytes("supersampleRatio=1.7\r\n"));
+            PatchRecord planned = new PatchRecord(620980, "Beat Saber", fx.InstallDir, dll, OpenCompositeArch.X64, originalHash, new string('0', 64), true, PatchFixture.Start);
+            DllChange patch = PatchSteps(dll, planned);
+            var actions = new List<PatchAction>(patch.Actions) { PatchAction.WriteIni(ini, "supersampleRatio=1.0\r\n", false) };
+            var change = new DllChange(dll, actions, planned, false);
+
+            ApplyResult result = fx.Service.Apply(Plan(null, change), false, false);
+
+            Assert.AreEqual(ApplyOutcome.Failed, result.Outcome);
+            StringAssert.Contains(result.Message, "Restore");
+            PatchRecord record = fx.FindRecord(dll);
+            Assert.IsNotNull(record);
+            Assert.AreEqual(FileHash.Sha256(dll), record.OpenCompositeSha256);
+            Assert.AreEqual(ocHash, record.OpenCompositeSha256);
+            Assert.IsFalse(record.IniCreated);
+            Assert.AreEqual("supersampleRatio=1.7\r\n", File.ReadAllText(ini));
+        }
+
+        [TestMethod]
+        public void Apply_BackupDeleteFailsAfterTheRestore_RemovesTheRecord()
+        {
+            string bak = dll + ".bak";
+            File.Copy(dll, bak);
+            File.Copy(cached, dll, true);
+            PatchState state = fx.StateStore.Load(new List<string>());
+            state.Put(RecordFor(dll, ocHash));
+            fx.StateStore.Save(state);
+            var change = new DllChange(dll, new[]
+            {
+                PatchAction.Verify(dll, ocHash),
+                PatchAction.Verify(bak, originalHash),
+                PatchAction.Restore(bak, dll, originalHash),
+                PatchAction.Verify(dll, originalHash),
+                PatchAction.Delete(bak, new string('0', 64)),
+            }, null, true);
+            var plan = new PatchPlan(PatchOperation.Restore, fx.Game, new[] { change }, null, null, null);
+
+            ApplyResult result = fx.Service.Apply(plan, false, false);
+
+            Assert.AreEqual(ApplyOutcome.Failed, result.Outcome);
+            Assert.AreEqual(originalHash, FileHash.Sha256(dll));
+            Assert.IsNull(fx.FindRecord(dll));
+            Assert.IsTrue(File.Exists(bak));
+        }
+
+        [TestMethod]
+        public void Apply_ExecutorThrowsAfterAFinishedDll_StillRecordsTheFinishedDll()
+        {
+            string dll2 = fx.WriteGameFile(@"x86\openvr_api.dll", PatchFixture.OriginalDll(PeFixture.MachineX86, 1));
+            // A null source is a programming error, not a disk error: it must not lose the record of the first DLL.
+            var broken = new DllChange(dll2, new[] { PatchAction.Copy(null, dll2, ocHash) }, RecordFor(dll2, ocHash), false);
+            PatchPlan plan = Plan(null, PatchSteps(dll, RecordFor(dll, ocHash)), broken);
+
+            Assert.ThrowsException<ArgumentNullException>(() => fx.Service.Apply(plan, false, false));
+
+            Assert.IsNotNull(fx.FindRecord(dll));
+            Assert.IsNull(fx.FindRecord(dll2));
+            Assert.AreEqual(ocHash, FileHash.Sha256(dll));
+        }
+
+        [TestMethod]
+        public void Apply_FolderDeniesCreatingFiles_ReportsNeedsElevation()
+        {
+            PatchPlan plan = Plan(null, PatchSteps(dll, RecordFor(dll, ocHash)));
+            var rule = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User, FileSystemRights.CreateFiles, AccessControlType.Deny);
+            DirectorySecurity security = Directory.GetAccessControl(fx.InstallDir);
+            security.AddAccessRule(rule);
+            Directory.SetAccessControl(fx.InstallDir, security);
+            try
+            {
+                string probe = Path.Combine(fx.InstallDir, "probe.txt");
+                try
+                {
+                    File.WriteAllText(probe, "x");
+                    File.Delete(probe);
+                    Assert.Inconclusive("A deny ACL did not block creating files for this account.");
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+
+                ApplyResult result = fx.Service.Apply(plan, false, false);
+
+                Assert.IsTrue(result.NeedsElevation);
+                Assert.AreNotEqual(ApplyOutcome.Succeeded, result.Outcome);
+                Assert.AreEqual(originalHash, FileHash.Sha256(dll));
+            }
+            finally
+            {
+                security.RemoveAccessRule(rule);
+                Directory.SetAccessControl(fx.InstallDir, security);
+            }
         }
 
         [TestMethod]

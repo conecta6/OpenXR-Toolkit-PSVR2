@@ -24,6 +24,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace GameManager.Core
@@ -119,7 +120,7 @@ namespace GameManager.Core
             {
                 // Checked first: in simulation mode nothing below runs, whatever the plan holds (R16). No game folder is written to.
                 return new ApplyResult(plan, ApplyOutcome.Simulated, null, false,
-                    "Simulation — nothing was changed." + NL + NL + DisplayText.PlanSummary(plan), null);
+                    "Simulation: nothing was written into any game folder." + NL + NL + DisplayText.PlanSummary(plan), null);
             }
             if (!plan.CanRun)
             {
@@ -140,12 +141,23 @@ namespace GameManager.Core
             if (!state.CanSave)
             {
                 return new ApplyResult(plan, ApplyOutcome.NotRun, null, false,
-                    title + ": nothing was changed, because the patch records (" + store.FilePath + ") could not be read, so the change could not be recorded.",
+                    title + ": nothing was changed, because the patch records (" + store.FilePath + ") cannot be saved safely (the file could not be read, or could not be set aside), so a change could not be recorded.",
                     warnings);
             }
 
-            ExecutionResult run = executor.Execute(plan);
-            Record(plan, run.CompletedChanges, state, warnings);
+            ExecutionResult run;
+            try
+            {
+                run = executor.Execute(plan);
+            }
+            catch (PatchExecutionException e)
+            {
+                // A bug, not a disk error: what was already written must still be recorded before it goes on.
+                Record(plan, e.Partial, state, warnings);
+                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
+                throw;
+            }
+            Record(plan, run, state, warnings);
 
             if (run.Refused)
             {
@@ -163,7 +175,7 @@ namespace GameManager.Core
             {
                 text.Append(NL).Append(NL).Append("Done before the stop:").Append(NL)
                     .Append(Bullets(run.CompletedActions.Select(a => a.Description).ToList()));
-                if (run.CompletedChanges > 0 && plan.Operation != PatchOperation.Restore)
+                if (plan.Operation != PatchOperation.Restore && run.CompletedActions.Any(a => a.Kind == PatchActionKind.CopyFile))
                 {
                     text.Append(NL).Append(NL).Append("Some of the game's DLLs were changed; use Restore to undo them.");
                 }
@@ -176,31 +188,27 @@ namespace GameManager.Core
             return new ApplyResult(plan, ApplyOutcome.Failed, run.CompletedActions, run.NeedsElevation, text.ToString(), warnings);
         }
 
-        private void Record(PatchPlan plan, int completedChanges, PatchState state, List<string> warnings)
+        private void Record(PatchPlan plan, ExecutionResult run, PatchState state, List<string> warnings)
         {
-            if (completedChanges == 0)
+            bool changed = false;
+            for (int i = 0; i < run.CompletedChanges; i++)
+            {
+                changed |= RecordChange(plan.Changes[i], run.CompletedActions, state, warnings);
+            }
+            // The change that failed may already have replaced or restored its DLL (later steps such as writing the
+            // ini or deleting the backup failed): the record must follow the file, not the plan.
+            if (run.FailedChangeIndex >= 0 && run.FailedChangeIndex < plan.Changes.Count)
+            {
+                DllChange partial = plan.Changes[run.FailedChangeIndex];
+                bool dllWritten = partial.Actions.Any(a => (a.Kind == PatchActionKind.CopyFile || a.Kind == PatchActionKind.RestoreFile) && run.CompletedActions.Contains(a));
+                if (dllWritten)
+                {
+                    changed |= RecordChange(partial, run.CompletedActions, state, warnings);
+                }
+            }
+            if (!changed)
             {
                 return;
-            }
-            for (int i = 0; i < completedChanges; i++)
-            {
-                DllChange change = plan.Changes[i];
-                if (change.RemovesRecord)
-                {
-                    state.Remove(change.DllPath);
-                }
-                else if (change.RecordToSave != null)
-                {
-                    try
-                    {
-                        // R30: the hash of the file now in the game folder, never a value from cache.json or the plan.
-                        state.Put(change.RecordToSave.WithOpenComposite(FileHash.Sha256(change.DllPath), utcNow()));
-                    }
-                    catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
-                    {
-                        warnings.Add(change.DllPath + " was changed, but could not be read back to record it (" + e.Message + "). Patch the game again to record it; its backup is reused.");
-                    }
-                }
             }
             try
             {
@@ -209,6 +217,38 @@ namespace GameManager.Core
             catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
             {
                 warnings.Add("The game files were changed, but the patch records could not be saved (" + store.FilePath + ": " + e.Message + "). The Status column may be out of date; patching the game again records it and reuses its backup.");
+            }
+        }
+
+        private bool RecordChange(DllChange change, IReadOnlyList<PatchAction> completed, PatchState state, List<string> warnings)
+        {
+            if (change.RemovesRecord)
+            {
+                state.Remove(change.DllPath);
+                return true;
+            }
+            if (change.RecordToSave == null)
+            {
+                return false;
+            }
+            try
+            {
+                // R30: the hash of the file now in the game folder, never a value from cache.json or the plan.
+                PatchRecord record = change.RecordToSave.WithOpenComposite(FileHash.Sha256(change.DllPath), utcNow());
+                bool iniPlanned = change.Actions.Any(a => a.Kind == PatchActionKind.WriteIni);
+                bool iniWritten = change.Actions.Any(a => a.Kind == PatchActionKind.WriteIni && completed.Contains(a));
+                if (record.IniCreated && iniPlanned && !iniWritten)
+                {
+                    record = new PatchRecord(record.AppId, record.GameName, record.InstallDir, record.DllPath, record.Arch,
+                        record.OriginalSha256, record.OpenCompositeSha256, false, record.PatchedUtc);
+                }
+                state.Put(record);
+                return true;
+            }
+            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+            {
+                warnings.Add(change.DllPath + " was changed, but could not be read back to record it (" + e.Message + "). Patch the game again to record it; its backup is reused.");
+                return false;
             }
         }
 

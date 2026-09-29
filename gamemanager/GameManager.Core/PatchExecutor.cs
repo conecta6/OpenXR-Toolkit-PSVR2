@@ -32,8 +32,9 @@ namespace GameManager.Core
     /// </summary>
     internal sealed class ExecutionResult
     {
-        public ExecutionResult(bool refused, IReadOnlyList<PatchAction> completedActions, int completedChanges, PatchAction failedAction, string error, bool needsElevation)
+        public ExecutionResult(bool refused, IReadOnlyList<PatchAction> completedActions, int completedChanges, PatchAction failedAction, string error, bool needsElevation, int failedChangeIndex = -1)
         {
+            FailedChangeIndex = failedChangeIndex;
             Refused = refused;
             CompletedActions = completedActions;
             CompletedChanges = completedChanges;
@@ -55,6 +56,12 @@ namespace GameManager.Core
         /// </summary>
         public PatchAction FailedAction { get; }
 
+        /// <summary>
+        /// Index in plan.Changes of the change that was running when a step failed, or -1. Its earlier steps may
+        /// already have written the DLL (CompletedActions says which), so the caller must still record that.
+        /// </summary>
+        public int FailedChangeIndex { get; }
+
         public string Error { get; }
 
         /// <summary>
@@ -66,6 +73,21 @@ namespace GameManager.Core
         {
             get { return !Refused && FailedAction == null; }
         }
+    }
+
+    /// <summary>
+    /// Thrown when a step fails with an exception that is not an I/O or permission error (a bug). Carries what was
+    /// done so far, so PatchService can still record it before the exception goes on.
+    /// </summary>
+    internal sealed class PatchExecutionException : Exception
+    {
+        public PatchExecutionException(ExecutionResult partial, Exception inner)
+            : base(inner.Message, inner)
+        {
+            Partial = partial;
+        }
+
+        public ExecutionResult Partial { get; }
     }
 
     /// <summary>
@@ -109,52 +131,64 @@ namespace GameManager.Core
                     {
                         break;
                     }
-                    string problem;
-                    try
-                    {
-                        problem = CheckHash(action.Target, action.ExpectedSha256);
-                    }
-                    catch (UnauthorizedAccessException e)
-                    {
-                        return new ExecutionResult(false, completed, 0, action, e.Message, true);
-                    }
-                    catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
-                    {
-                        return new ExecutionResult(false, completed, 0, action, e.Message, false);
-                    }
+                    PatchAction verify = action;
+                    string problem = RunGuarded(() => CheckHash(verify.Target, verify.ExpectedSha256), out bool denied);
                     if (problem != null)
                     {
-                        return new ExecutionResult(false, completed, 0, action, problem, false);
+                        return new ExecutionResult(false, completed, 0, action, problem, denied);
                     }
                 }
             }
 
             int completedChanges = 0;
-            foreach (DllChange change in plan.Changes)
+            int changeIndex = 0;
+            PatchAction current = null;
+            try
             {
-                foreach (PatchAction action in change.Actions)
+                for (; changeIndex < plan.Changes.Count; changeIndex++)
                 {
-                    try
+                    foreach (PatchAction action in plan.Changes[changeIndex].Actions)
                     {
-                        string problem = Run(action);
+                        current = action;
+                        PatchAction step = action;
+                        string problem = RunGuarded(() => Run(step), out bool denied);
                         if (problem != null)
                         {
-                            return new ExecutionResult(false, completed, completedChanges, action, problem, false);
+                            return new ExecutionResult(false, completed, completedChanges, action, problem, denied, changeIndex);
                         }
+                        completed.Add(action);
                     }
-                    catch (UnauthorizedAccessException e)
-                    {
-                        return new ExecutionResult(false, completed, completedChanges, action, e.Message, true);
-                    }
-                    catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
-                    {
-                        return new ExecutionResult(false, completed, completedChanges, action, e.Message, false);
-                    }
-                    completed.Add(action);
+                    completedChanges++;
                 }
-                completedChanges++;
+            }
+            catch (Exception e)
+            {
+                throw new PatchExecutionException(
+                    new ExecutionResult(false, completed, completedChanges, current, e.Message, false, changeIndex), e);
             }
             return new ExecutionResult(false, completed, completedChanges, null, null, false);
+        }
+
+        /// <summary>
+        /// Runs one step. Null when it succeeded, else why it did not. I/O and permission errors become the reason
+        /// (needsElevation is set for a denied write); any other exception goes on.
+        /// </summary>
+        private static string RunGuarded(Func<string> step, out bool needsElevation)
+        {
+            needsElevation = false;
+            try
+            {
+                return step();
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                needsElevation = true;
+                return e.Message;
+            }
+            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+            {
+                return e.Message;
+            }
         }
 
         /// <summary>
@@ -169,9 +203,7 @@ namespace GameManager.Core
                     {
                         return action.Target + " already exists; a backup never overwrites a file.";
                     }
-                    // overwrite: false, so a file that appeared since the check above is not replaced either.
-                    File.Copy(action.Source, action.Target, false);
-                    return null;
+                    return BackupVerified(action.Source, action.Target);
 
                 case PatchActionKind.VerifyHash:
                     return CheckHash(action.Target, action.ExpectedSha256);
@@ -220,6 +252,32 @@ namespace GameManager.Core
                 return null;
             }
             return path + " has changed (SHA-256 " + actual + ", expected " + expected + "). Steam or another program may have updated it since the plan was made.";
+        }
+
+        /// <summary>
+        /// Copies source to a temporary file next to target, checks that the copy has source's hash, then moves it to
+        /// target without overwriting (File.Move fails if target exists), so a failed copy never leaves a partial
+        /// backup. The temporary file is removed on any failure.
+        /// </summary>
+        private static string BackupVerified(string source, string target)
+        {
+            string temp = TempPathFor(target);
+            try
+            {
+                File.Copy(source, temp, false);
+                string expected = FileHash.Sha256(source);
+                string actual = FileHash.Sha256(temp);
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return "The copy of " + source + " does not match the original (SHA-256 " + actual + ", expected " + expected + "); no backup was made.";
+                }
+                File.Move(temp, target);
+                return null;
+            }
+            finally
+            {
+                AtomicFile.TryDelete(temp);
+            }
         }
 
         /// <summary>

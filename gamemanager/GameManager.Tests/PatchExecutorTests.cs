@@ -124,6 +124,19 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void Execute_BackupCopyIsNotTheSource_LeavesNoBackupAndNoTemporaryFile()
+        {
+            string bad = Path.Combine(fx.InstallDir, "nothing.dll");
+
+            var change = new DllChange(dll, new[] { PatchAction.Backup(bad, bak) }, null, false);
+            ExecutionResult result = executor.Execute(Plan(change));
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.IsFalse(File.Exists(bak));
+            Assert.AreEqual(0, TemporaryFiles().Length);
+        }
+
+        [TestMethod]
         public void Execute_DllDeletedSinceThePlan_StopsBeforeWritingAnything()
         {
             File.Delete(dll);

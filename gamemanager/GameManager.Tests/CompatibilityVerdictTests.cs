@@ -31,7 +31,7 @@ namespace GameManager.Tests
         [TestMethod]
         public void For_NotListedNoMarkers_IsUntestedAndNotBlocked()
         {
-            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0]);
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0], new string[0]);
 
             Assert.AreEqual(CompatibilityStatus.Untested, verdict.ListStatus);
             Assert.IsFalse(verdict.Blocked);
@@ -44,7 +44,7 @@ namespace GameManager.Tests
         {
             var entry = new CompatibilityEntry(438100, "VRChat", CompatibilityStatus.AntiCheat, "EasyAntiCheat");
 
-            CompatibilityVerdict verdict = CompatibilityVerdict.For(entry, new string[0]);
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(entry, new string[0], new string[0]);
 
             Assert.IsTrue(verdict.Blocked);
             Assert.AreEqual(CompatibilityStatus.AntiCheat, verdict.ListStatus);
@@ -57,7 +57,7 @@ namespace GameManager.Tests
         {
             var entry = new CompatibilityEntry(1, "Game", CompatibilityStatus.Works, "");
 
-            CompatibilityVerdict verdict = CompatibilityVerdict.For(entry, new[] { "EasyAntiCheat", @"EasyAntiCheat\EasyAntiCheat_EOS_Setup.exe" });
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(entry, new[] { "EasyAntiCheat", @"EasyAntiCheat\EasyAntiCheat_EOS_Setup.exe" }, new string[0]);
 
             Assert.IsTrue(verdict.Blocked);
             Assert.AreEqual(CompatibilityStatus.Works, verdict.ListStatus);
@@ -69,7 +69,7 @@ namespace GameManager.Tests
         {
             var entry = new CompatibilityEntry(546560, "Half-Life: Alyx", CompatibilityStatus.Broken, "Input");
 
-            CompatibilityVerdict verdict = CompatibilityVerdict.For(entry, new string[0]);
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(entry, new string[0], new string[0]);
 
             Assert.IsFalse(verdict.Blocked);
             Assert.AreEqual(CompatibilityStatus.Broken, verdict.ListStatus);
@@ -90,7 +90,7 @@ namespace GameManager.Tests
         [TestMethod]
         public void For_WithoutUncheckedFolders_AntiCheatIsRuledOut()
         {
-            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0]);
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0], new string[0]);
 
             Assert.IsFalse(verdict.AntiCheatNotRuledOut);
             Assert.AreEqual(0, verdict.UncheckedFolders.Count);

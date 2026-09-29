@@ -79,7 +79,8 @@ namespace GameManager.Core
         }
 
         /// <summary>
-        /// Tooltip text: why the game is blocked, then the list notes. "" when there is nothing to say.
+        /// Tooltip text: why the game is blocked, then the "Anti-cheat not ruled out" note when some folders could
+        /// not be checked (R31), then the list notes. "" when there is nothing to say.
         /// </summary>
         public static string CompatibilityDetails(CompatibilityVerdict verdict)
         {

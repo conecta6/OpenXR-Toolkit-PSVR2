@@ -78,11 +78,6 @@ namespace GameManager.Core
             get { return UncheckedFolders.Count > 0; }
         }
 
-        public static CompatibilityVerdict For(CompatibilityEntry listEntry, IReadOnlyList<string> antiCheatMarkers)
-        {
-            return For(listEntry, antiCheatMarkers, new string[0]);
-        }
-
         public static CompatibilityVerdict For(
             CompatibilityEntry listEntry,
             IReadOnlyList<string> antiCheatMarkers,

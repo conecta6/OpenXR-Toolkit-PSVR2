@@ -69,11 +69,11 @@ namespace GameManager.Tests
         [TestMethod]
         public void Compatibility_HasReadableNames()
         {
-            Assert.AreEqual("Works", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.Works, ""), new string[0])));
-            Assert.AreEqual("Broken", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.Broken, ""), new string[0])));
-            Assert.AreEqual("Untested", DisplayText.Compatibility(CompatibilityVerdict.For(null, new string[0])));
-            Assert.AreEqual("Anti-cheat — blocked", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.AntiCheat, ""), new string[0])));
-            Assert.AreEqual("Anti-cheat — blocked", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.Works, ""), new[] { "BattlEye" })));
+            Assert.AreEqual("Works", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.Works, ""), new string[0], new string[0])));
+            Assert.AreEqual("Broken", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.Broken, ""), new string[0], new string[0])));
+            Assert.AreEqual("Untested", DisplayText.Compatibility(CompatibilityVerdict.For(null, new string[0], new string[0])));
+            Assert.AreEqual("Anti-cheat — blocked", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.AntiCheat, ""), new string[0], new string[0])));
+            Assert.AreEqual("Anti-cheat — blocked", DisplayText.Compatibility(CompatibilityVerdict.For(new CompatibilityEntry(1, "A", CompatibilityStatus.Works, ""), new[] { "BattlEye" }, new string[0])));
         }
 
         [TestMethod]
@@ -83,8 +83,8 @@ namespace GameManager.Tests
 
             Assert.AreEqual(
                 "Listed as an anti-cheat game in compatibility.json. Anti-cheat files found: EasyAntiCheat. Notes: Ships EasyAntiCheat.",
-                DisplayText.CompatibilityDetails(CompatibilityVerdict.For(entry, new[] { "EasyAntiCheat" })));
-            Assert.AreEqual("", DisplayText.CompatibilityDetails(CompatibilityVerdict.For(null, new string[0])));
+                DisplayText.CompatibilityDetails(CompatibilityVerdict.For(entry, new[] { "EasyAntiCheat" }, new string[0])));
+            Assert.AreEqual("", DisplayText.CompatibilityDetails(CompatibilityVerdict.For(null, new string[0], new string[0])));
         }
 
         [TestMethod]

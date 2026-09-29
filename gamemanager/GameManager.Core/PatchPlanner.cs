@@ -393,21 +393,40 @@ namespace GameManager.Core
                 // Only after the DLL is verified to be the recorded original (leading check or the step above).
                 actions.Add(PatchAction.Delete(bakPath, record.OriginalSha256));
             }
-            AddIniDelete(actions, record, inisPlanned);
+            AddIniDelete(plan, actions, record, relative, inisPlanned);
             plan.Changes.Add(new DllChange(dllPath, actions, null, true));
         }
 
-        private static void AddIniDelete(List<PatchAction> actions, PatchRecord record, HashSet<string> inisPlanned)
+        private static void AddIniDelete(PlanBuilder plan, List<PatchAction> actions, PatchRecord record, string relativeDll, HashSet<string> inisPlanned)
         {
-            // R18: only an opencomposite.ini Game Manager created is deleted.
+            // R18: only an opencomposite.ini Game Manager created, and that is still exactly what it wrote, is deleted.
             if (!record.IniCreated)
             {
                 return;
             }
             string iniPath = Path.Combine(Path.GetDirectoryName(record.DllPath), OpenCompositeIni.FileName);
-            if (inisPlanned.Add(iniPath) && File.Exists(iniPath))
+            if (!inisPlanned.Add(iniPath) || !File.Exists(iniPath))
             {
-                actions.Add(PatchAction.Delete(iniPath, null));
+                return;
+            }
+            string shown = Path.Combine(Path.GetDirectoryName(relativeDll), OpenCompositeIni.FileName);
+            string current;
+            try
+            {
+                current = FileHash.Sha256(iniPath);
+            }
+            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+            {
+                plan.Notes.Add(shown + " could not be read (" + e.Message + "), so it was left in place.");
+                return;
+            }
+            if (Same(current, record.IniSha256))
+            {
+                actions.Add(PatchAction.Delete(iniPath, current));
+            }
+            else
+            {
+                plan.Notes.Add(shown + " was left in place: it has changed since Game Manager wrote it, or Game Manager did not record what it wrote.");
             }
         }
 
@@ -539,12 +558,12 @@ namespace GameManager.Core
                 actions.Add(PatchAction.Verify(dllPath, target));
             }
 
-            bool iniCreated = record != null && record.IniCreated;
+            // The ini state stays as recorded until the write actually happens: PatchService then records the new
+            // hash, and a failed write keeps the old state.
             PatchAction ini = PlanIni(plan, dllPath, relativePath, options, inputs, inisPlanned);
             if (ini != null)
             {
                 actions.Add(ini);
-                iniCreated = true;
             }
             if (alreadyOurs && actions.Count > 0 && actions[0].Kind != PatchActionKind.VerifyHash)
             {
@@ -558,7 +577,7 @@ namespace GameManager.Core
                 return;
             }
             // Its OpenCompositeSha256 is replaced by the hash of the written file when the plan runs (R30).
-            var recordToSave = new PatchRecord(game.AppId, game.Name, game.InstallDir, dllPath, arch, original, target, iniCreated, utcNow());
+            var recordToSave = new PatchRecord(game.AppId, game.Name, game.InstallDir, dllPath, arch, original, target, record != null && record.IniCreated, utcNow(), record?.IniSha256);
             plan.Changes.Add(new DllChange(dllPath, actions, recordToSave, false));
         }
 
@@ -582,16 +601,34 @@ namespace GameManager.Core
             {
                 return null;
             }
-            bool ours = inputs.State.Records.Any(r => r.IniCreated
-                && string.Equals(Path.GetDirectoryName(r.DllPath), folder, StringComparison.OrdinalIgnoreCase));
-            if (File.Exists(iniPath) && !ours)
+            string shown = Path.Combine(Path.GetDirectoryName(relativePath), OpenCompositeIni.FileName);
+            List<PatchRecord> createdHere = inputs.State.Records.Where(r => r.IniCreated
+                && string.Equals(Path.GetDirectoryName(r.DllPath), folder, StringComparison.OrdinalIgnoreCase)).ToList();
+            bool overwrite = false;
+            if (File.Exists(iniPath))
             {
-                // R21: an ini Game Manager did not create is never overwritten.
-                plan.Notes.Add(Path.Combine(Path.GetDirectoryName(relativePath), OpenCompositeIni.FileName)
-                    + " already exists and was not created by Game Manager; it was left unchanged.");
-                return null;
+                // R21: only an ini that is still exactly what Game Manager wrote is overwritten. One it did not write,
+                // one changed since, and one whose hash was never recorded are all left alone.
+                string currentHash;
+                try
+                {
+                    currentHash = FileHash.Sha256(iniPath);
+                }
+                catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+                {
+                    plan.Notes.Add(shown + " could not be read (" + e.Message + "); it was left unchanged.");
+                    return null;
+                }
+                if (!createdHere.Any(r => Same(r.IniSha256, currentHash)))
+                {
+                    plan.Notes.Add(shown + (createdHere.Count == 0
+                        ? " already exists and was not created by Game Manager; it was left unchanged."
+                        : " was created by Game Manager but has changed since (or Game Manager did not record what it wrote); it was left unchanged."));
+                    return null;
+                }
+                overwrite = true;
             }
-            return PatchAction.WriteIni(iniPath, OpenCompositeIni.Render(options.SupersampleRatio), ours);
+            return PatchAction.WriteIni(iniPath, OpenCompositeIni.Render(options.SupersampleRatio), overwrite);
         }
 
         private static void AddAntiCheatQuestion(PlanBuilder plan, GameEntry entry)
@@ -600,7 +637,7 @@ namespace GameManager.Core
             {
                 // R29/R31: read from the verdict, never from warning text.
                 plan.Confirmations.Add("Anti-cheat could not be ruled out: these folders could not be checked for anti-cheat files: "
-                    + string.Join(", ", entry.Compatibility.UncheckedFolders)
+                    + DisplayText.FolderList(entry.Compatibility.UncheckedFolders)
                     + ". Patching a game that has anti-cheat can get your account banned. Continue only if you are sure this game has none.");
             }
         }
@@ -642,6 +679,12 @@ namespace GameManager.Core
             foreach (PatchRecord record in inputs.State.Records)
             {
                 inputs.KnownOpenComposite.Add(record.OpenCompositeSha256);
+            }
+            // Every build ever downloaded or accepted, even one no longer cached and no longer in any record: an old
+            // OpenComposite DLL must never be taken for the game's original.
+            foreach (string hash in cache.GetKnownHashes(new List<string>()))
+            {
+                inputs.KnownOpenComposite.Add(hash);
             }
             return inputs;
         }

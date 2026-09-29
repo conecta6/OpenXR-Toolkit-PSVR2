@@ -51,5 +51,28 @@ namespace GameManager.Core
             items.Add(warning);
             return true;
         }
+
+        /// <summary>
+        /// Removes every warning the predicate accepts (a warning that stopped being true, such as "license notice
+        /// not accepted" after the user accepted it). It can be added again later. Returns how many were removed.
+        /// </summary>
+        public int RemoveWhere(Func<string, bool> predicate)
+        {
+            if (predicate == null)
+            {
+                throw new ArgumentNullException(nameof(predicate));
+            }
+            int removed = 0;
+            for (int i = items.Count - 1; i >= 0; i--)
+            {
+                if (predicate(items[i]))
+                {
+                    seen.Remove(items[i]);
+                    items.RemoveAt(i);
+                    removed++;
+                }
+            }
+            return removed;
+        }
     }
 }

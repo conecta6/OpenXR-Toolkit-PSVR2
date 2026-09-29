@@ -223,7 +223,7 @@ namespace GameManager.Tests
         public void Apply_IniWriteFailsAfterTheCopy_StillRecordsThePatchedDll()
         {
             string ini = fx.WriteGameFile("opencomposite.ini", System.Text.Encoding.ASCII.GetBytes("supersampleRatio=1.7\r\n"));
-            PatchRecord planned = new PatchRecord(620980, "Beat Saber", fx.InstallDir, dll, OpenCompositeArch.X64, originalHash, new string('0', 64), true, PatchFixture.Start);
+            PatchRecord planned = new PatchRecord(620980, "Beat Saber", fx.InstallDir, dll, OpenCompositeArch.X64, originalHash, new string('0', 64), false, PatchFixture.Start);
             DllChange patch = PatchSteps(dll, planned);
             var actions = new List<PatchAction>(patch.Actions) { PatchAction.WriteIni(ini, "supersampleRatio=1.0\r\n", false) };
             var change = new DllChange(dll, actions, planned, false);

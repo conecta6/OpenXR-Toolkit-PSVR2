@@ -24,6 +24,7 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows.Forms;
+using GameManager.Core;
 
 namespace GameManager
 {
@@ -36,9 +37,11 @@ namespace GameManager
         private const int ErrorCancelled = 1223;
 
         /// <summary>
+        /// The elevated copy is told which app-data folder to use (the current user's), because Windows would otherwise
+        /// give it the administrator account's own %LOCALAPPDATA%, with no records or OpenComposite cache.
         /// True when an elevated copy was started; the caller then closes this window.
         /// </summary>
-        public static bool Offer(IWin32Window owner, string reason)
+        public static bool Offer(IWin32Window owner, string reason, string appDataRoot)
         {
             DialogResult answer = MessageBox.Show(
                 owner,
@@ -55,7 +58,11 @@ namespace GameManager
             }
             try
             {
-                Process.Start(new ProcessStartInfo(Application.ExecutablePath) { UseShellExecute = true, Verb = "runas" });
+                Process.Start(new ProcessStartInfo(Application.ExecutablePath, StartupArguments.AppDataArgument(appDataRoot))
+                {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                });
                 return true;
             }
             catch (Win32Exception e) when (e.NativeErrorCode == ErrorCancelled)

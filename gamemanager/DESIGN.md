@@ -137,10 +137,15 @@ thread.
   to it; otherwise the game is blocked, because an OpenComposite DLL must never become "the original".
   Batches ("Re-patch all", "Update all") never ask: such games are skipped and reported.
 - Restore (R18, R36): puts the original back from the `.bak` and verifies it (when Steam already put the original
-  back, only the `.bak` is removed; with no `.bak`, only the record is), and only after that deletes the `.bak`
-  and an `opencomposite.ini` Game Manager created (an ini it did not create is never touched). A `.bak` that no
+  back, only the `.bak` is removed), and only after that deletes the `.bak`. With no `.bak`, the record alone is
+  removed only when the DLL already is the recorded original (or is gone); when there is no `.bak` and the DLL is
+  not the original, the restore is blocked, because the original cannot be put back (use Steam's "Verify integrity
+  of game files"). An `opencomposite.ini` is deleted only if Game Manager created it and it still hashes to the
+  SHA-256 recorded when Game Manager wrote it; an ini it did not create, one edited since, and one from a record
+  that has no ini hash (older `state.json`) are left in place, with a note. A `.bak` that no
   longer matches the recorded original stops the restore. Any known OpenComposite
-  build is replaced without a question, since that loses nothing. Restore stays enabled for a patched game that is
+  build (cached, waiting, recorded, or ever downloaded or accepted, which `cache.json` keeps in a never-pruned
+  list) is replaced without a question, since that loses nothing. Restore stays enabled for a patched game that is
   blocked or no longer OpenVR (R36): getting back to the original is always the safer direction.
 - Anti-cheat confirmation (R29): when a game's folders could not all be checked for anti-cheat files
   (`UncheckedFolders`, for example an unreadable subfolder or a junction), Patch says so and asks (default No);
@@ -177,7 +182,16 @@ thread.
   to be handled by Re-patch all or Restore. "Update all" plans only the verify, copy and verify steps of the
   OpenComposite DLL, so the `.bak` never appears in an update plan.
 - `opencomposite.ini` sits next to each patched `openvr_api.dll` (OpenComposite reads it from that folder) as the
-  single line `supersampleRatio=<value>`. An ini Game Manager did not create is never overwritten.
+  single line `supersampleRatio=<value>`. Ownership is by hash: the SHA-256 of the file is recorded when Game
+  Manager writes it, and Patch overwrites (and Restore deletes) the ini only while its current hash equals the
+  recorded one. An ini Game Manager did not create, one edited since, and one whose record has no hash are never
+  overwritten or deleted; a note says so. If a planned overwrite of Game Manager's own ini fails, the record keeps
+  its ini flag and old hash.
+- When Windows denies a write, Game Manager may relaunch itself as administrator (Yes/No box, default No). The
+  elevated copy is started with `--app-data "<folder>"` (the only accepted argument, and only a fully qualified
+  path) so it keeps using the app data of the user who started it, not the administrator account's.
+- Lists of folders in messages (the anti-cheat question, the status tooltip) show at most 10 folders, then
+  "and N more".
 
 ## OpenComposite: source and license
 

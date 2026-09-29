@@ -34,14 +34,20 @@ namespace GameManager
         /// relaunch of R22 is only ever offered, from ElevatedRelaunch.
         /// </summary>
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             HttpDownloader.EnableModernTls();
 
             string compatibilityPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CompatibilityList.FileName);
-            AppDataPaths appData = AppDataPaths.ForCurrentUser();
+            string argumentWarning;
+            string appDataOverride = StartupArguments.ParseAppData(args, out argumentWarning);
+            if (argumentWarning != null)
+            {
+                MessageBox.Show(argumentWarning, "Game Manager", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            AppDataPaths appData = appDataOverride != null ? new AppDataPaths(appDataOverride) : AppDataPaths.ForCurrentUser();
             Func<DateTime> utcNow = () => DateTime.UtcNow;
             using (var http = new HttpDownloader())
             {
@@ -49,7 +55,7 @@ namespace GameManager
                 var state = new PatchStateStore(appData.StateFile, utcNow);
                 var planner = new PatchPlanner(openComposite, state, utcNow);
                 var patchService = new PatchService(state, new RunningGameGuard(new WindowsProcessImageSource()), utcNow);
-                Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader()), compatibilityPath, openComposite, planner, patchService));
+                Application.Run(new MainForm(new SteamLocator(new WindowsRegistryReader()), compatibilityPath, openComposite, planner, patchService, appData.Root));
             }
         }
     }

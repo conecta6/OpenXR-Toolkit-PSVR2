@@ -43,7 +43,8 @@ namespace GameManager.Core
             string originalSha256,
             string openCompositeSha256,
             bool iniCreated,
-            DateTime patchedUtc)
+            DateTime patchedUtc,
+            string iniSha256 = null)
         {
             if (!PathUtil.IsFullyQualified(dllPath))
             {
@@ -74,6 +75,7 @@ namespace GameManager.Core
             OpenCompositeSha256 = openCompositeSha256.ToLowerInvariant();
             IniCreated = iniCreated;
             PatchedUtc = patchedUtc;
+            IniSha256 = PatchState.IsSha256(iniSha256) ? iniSha256.ToLowerInvariant() : null;
         }
 
         public int AppId { get; }
@@ -100,11 +102,26 @@ namespace GameManager.Core
         public DateTime PatchedUtc { get; }
 
         /// <summary>
+        /// SHA-256 of the opencomposite.ini Game Manager last wrote, or null (no ini, or a record from before this
+        /// was kept). The ini is overwritten or deleted only while its current hash is this one: a null hash means
+        /// "unknown", and the file is left alone.
+        /// </summary>
+        public string IniSha256 { get; }
+
+        /// <summary>
+        /// A copy with another ini state (whether Game Manager created it, and the hash of what it wrote).
+        /// </summary>
+        public PatchRecord WithIni(bool iniCreated, string iniSha256)
+        {
+            return new PatchRecord(AppId, GameName, InstallDir, DllPath, Arch, OriginalSha256, OpenCompositeSha256, iniCreated, PatchedUtc, iniSha256);
+        }
+
+        /// <summary>
         /// A copy with a new OpenComposite hash and time; the hash is always FileHash of the DLL actually written (R30).
         /// </summary>
         public PatchRecord WithOpenComposite(string openCompositeSha256, DateTime patchedUtc)
         {
-            return new PatchRecord(AppId, GameName, InstallDir, DllPath, Arch, OriginalSha256, openCompositeSha256, IniCreated, patchedUtc);
+            return new PatchRecord(AppId, GameName, InstallDir, DllPath, Arch, OriginalSha256, openCompositeSha256, IniCreated, patchedUtc, IniSha256);
         }
     }
 
@@ -196,7 +213,7 @@ namespace GameManager.Core
 
     /// <summary>
     /// R20: state.json, { "version": 1, "records": [ { appId, gameName, installDir, dllPath, arch, originalSha256,
-    /// openCompositeSha256, iniCreated, patchedUtc } ] }, written atomically. Load may rename an unusable file inside the app-data folder
+    /// openCompositeSha256, iniCreated, patchedUtc, iniSha256 (optional) } ] }, written atomically. Load may rename an unusable file inside the app-data folder
     /// to state.json.corrupt-&lt;UTC time&gt; and start with no records; a file that cannot be read is never overwritten.
     /// </summary>
     public sealed class PatchStateStore
@@ -317,6 +334,7 @@ namespace GameManager.Core
                     OriginalSha256 = record.OriginalSha256,
                     OpenCompositeSha256 = record.OpenCompositeSha256,
                     IniCreated = record.IniCreated,
+                    IniSha256 = record.IniSha256,
                     PatchedUtc = JsonFile.FormatUtc(record.PatchedUtc),
                 });
             }
@@ -392,7 +410,8 @@ namespace GameManager.Core
                     item.OriginalSha256,
                     item.OpenCompositeSha256,
                     item.IniCreated,
-                    JsonFile.ParseUtc(item.PatchedUtc) ?? DateTime.MinValue);
+                    JsonFile.ParseUtc(item.PatchedUtc) ?? DateTime.MinValue,
+                    item.IniSha256);
             }
             catch (ArgumentException)
             {
@@ -439,6 +458,9 @@ namespace GameManager.Core
 
             [DataMember(Name = "patchedUtc", Order = 9)]
             public string PatchedUtc { get; set; }
+
+            [DataMember(Name = "iniSha256", Order = 10, EmitDefaultValue = false)]
+            public string IniSha256 { get; set; }
         }
     }
 }

@@ -84,7 +84,7 @@ namespace GameManager
         // True while the status line shows a notice or an error instead of the summary.
         private bool noticeShowing;
 
-        public MainForm(SteamLocator locator, string compatibilityPath, OpenCompositeCache openComposite, PatchPlanner planner, PatchService patchService)
+        public MainForm(SteamLocator locator, string compatibilityPath, OpenCompositeCache openComposite, PatchPlanner planner, PatchService patchService, string appDataRoot)
         {
             this.locator = locator ?? throw new ArgumentNullException(nameof(locator));
             this.compatibilityPath = compatibilityPath ?? throw new ArgumentNullException(nameof(compatibilityPath));
@@ -142,8 +142,8 @@ namespace GameManager
                 WordWrap = false,
             };
 
-            openCompositeBar = new OpenCompositeBar(openComposite, gate, AddWarning, ShowNotice);
-            patchBar = new PatchBar(planner, patchService, gate, AddWarning, ShowNotice);
+            openCompositeBar = new OpenCompositeBar(openComposite, gate, AddWarning, RemoveWarnings, ShowNotice);
+            patchBar = new PatchBar(planner, patchService, gate, appDataRoot, AddWarning, ShowNotice);
             patchBar.StatusesChanged += OnStatusesChanged;
             patchBar.RelaunchStarted += OnRelaunchStarted;
             openCompositeBar.CacheChanged += OnStatusesChanged;
@@ -255,6 +255,19 @@ namespace GameManager
                     // Keeps the warning count on the status line current.
                     ShowStatusLine();
                 }
+            }
+        }
+
+        private void RemoveWarnings(Func<string, bool> predicate)
+        {
+            if (IsDisposed || operationWarnings.RemoveWhere(predicate) == 0)
+            {
+                return;
+            }
+            RenderWarnings();
+            if (!noticeShowing && scanCancellation == null && scanProducedList)
+            {
+                ShowStatusLine();
             }
         }
 

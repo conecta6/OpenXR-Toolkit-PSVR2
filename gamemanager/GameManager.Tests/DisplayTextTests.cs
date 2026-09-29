@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 using System;
+using System.Linq;
 using GameManager.Core;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -128,6 +129,35 @@ namespace GameManager.Tests
             Assert.AreEqual(
                 @"Anti-cheat not ruled out: these folders could not be checked: C:\G\Link, C:\G\Locked.",
                 DisplayText.CompatibilityDetails(verdict));
+        }
+
+        [TestMethod]
+        public void FolderList_AtMostTen_ListsAllOfThem()
+        {
+            Assert.AreEqual("", DisplayText.FolderList(new string[0]));
+            Assert.AreEqual("A, B", DisplayText.FolderList(new[] { "A", "B" }));
+            string ten = string.Join(", ", Enumerable.Range(1, 10).Select(i => "F" + i));
+            Assert.AreEqual(ten, DisplayText.FolderList(Enumerable.Range(1, 10).Select(i => "F" + i).ToArray()));
+        }
+
+        [TestMethod]
+        public void FolderList_MoreThanTen_ShowsTenAndCountsTheRest()
+        {
+            string[] folders = Enumerable.Range(1, 13).Select(i => "F" + i).ToArray();
+
+            Assert.AreEqual("F1, F2, F3, F4, F5, F6, F7, F8, F9, F10 and 3 more", DisplayText.FolderList(folders));
+        }
+
+        [TestMethod]
+        public void CompatibilityDetails_ManyUncheckedFolders_AreCapped()
+        {
+            string[] folders = Enumerable.Range(1, 11).Select(i => @"C:\G\F" + i).ToArray();
+            CompatibilityVerdict verdict = CompatibilityVerdict.For(null, new string[0], folders);
+
+            string text = DisplayText.CompatibilityDetails(verdict);
+
+            StringAssert.Contains(text, @"C:\G\F10 and 1 more.");
+            Assert.IsFalse(text.Contains(@"C:\G\F11"));
         }
 
         [TestMethod]

@@ -39,6 +39,7 @@ namespace GameManager
         private readonly PatchPlanner planner;
         private readonly PatchService service;
         private readonly OperationGate gate;
+        private readonly string appDataRoot;
         private readonly Action<string> addWarning;
         private readonly Action<string> showNotice;
         private readonly Button patchButton;
@@ -53,11 +54,12 @@ namespace GameManager
         private GamePatchStatus selectedStatus;
         private bool running;
 
-        public PatchBar(PatchPlanner planner, PatchService service, OperationGate gate, Action<string> addWarning, Action<string> showNotice)
+        public PatchBar(PatchPlanner planner, PatchService service, OperationGate gate, string appDataRoot, Action<string> addWarning, Action<string> showNotice)
         {
             this.planner = planner ?? throw new ArgumentNullException(nameof(planner));
             this.service = service ?? throw new ArgumentNullException(nameof(service));
             this.gate = gate ?? throw new ArgumentNullException(nameof(gate));
+            this.appDataRoot = appDataRoot ?? throw new ArgumentNullException(nameof(appDataRoot));
             this.addWarning = addWarning ?? throw new ArgumentNullException(nameof(addWarning));
             this.showNotice = showNotice ?? throw new ArgumentNullException(nameof(showNotice));
 
@@ -240,7 +242,7 @@ namespace GameManager
                 {
                     StatusesChanged?.Invoke(this, EventArgs.Empty);
                 }
-                return result.NeedsElevation && ElevatedRelaunch.Offer(FindForm(), result.Message);
+                return result.NeedsElevation && ElevatedRelaunch.Offer(FindForm(), result.Message, appDataRoot);
             });
         }
 
@@ -337,7 +339,7 @@ namespace GameManager
                 {
                     StatusesChanged?.Invoke(this, EventArgs.Empty);
                 }
-                return result.NeedsElevation && ElevatedRelaunch.Offer(FindForm(), result.Message);
+                return result.NeedsElevation && ElevatedRelaunch.Offer(FindForm(), result.Message, appDataRoot);
             });
         }
 

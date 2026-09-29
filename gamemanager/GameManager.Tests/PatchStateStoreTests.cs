@@ -202,6 +202,28 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void IniSha256_RoundTrips_AndAnOldRecordWithoutItLoadsAsUnknown()
+        {
+            string path = Path.Combine(temp.Root, "AppData", "state.json");
+            var state = new PatchState(true);
+            state.Put(new PatchRecord(1, "A", @"C:\Games\A", @"C:\Games\A\openvr_api.dll", OpenCompositeArch.X64, HashA, HashB, true, Now, HashB.ToUpperInvariant()));
+            store.Save(state);
+
+            PatchRecord loaded = store.Load(new List<string>()).Find(@"C:\Games\A\openvr_api.dll");
+            Assert.AreEqual(HashB, loaded.IniSha256, "kept in lower case");
+            Assert.IsNull(loaded.WithOpenComposite(HashA, Now).WithIni(false, null).IniSha256);
+            Assert.AreEqual(HashB, loaded.WithOpenComposite(HashA, Now).IniSha256, "an update keeps the ini hash");
+
+            // A state.json written before the ini hash existed: iniCreated true, no iniSha256.
+            temp.WriteText(@"AppData\state.json",
+                "{ \"version\": 1, \"records\": [ { \"dllPath\": \"C:\\\\Games\\\\A\\\\openvr_api.dll\", \"arch\": \"x64\", \"originalSha256\": \"" + HashA + "\", \"openCompositeSha256\": \"" + HashB + "\", \"iniCreated\": true, \"patchedUtc\": \"2026-09-29T10:15:00Z\" } ] }",
+                new UTF8Encoding(false));
+            PatchRecord legacy = store.Load(new List<string>()).Find(@"C:\Games\A\openvr_api.dll");
+            Assert.IsTrue(legacy.IniCreated);
+            Assert.IsNull(legacy.IniSha256);
+        }
+
+        [TestMethod]
         public void Load_FileWithByteOrderMark_Loads()
         {
             temp.WriteText(@"AppData\state.json",

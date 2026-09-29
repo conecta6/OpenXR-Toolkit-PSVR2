@@ -44,6 +44,7 @@ namespace GameManager
         private readonly OpenCompositeCache cache;
         private readonly OperationGate gate;
         private readonly Action<string> addWarning;
+        private readonly Action<Func<string, bool>> removeWarnings;
         private readonly Action<string> showNotice;
         private readonly Button downloadButton;
         private readonly Button checkButton;
@@ -53,11 +54,12 @@ namespace GameManager
         private int cachedBuildCount;
         private bool hasPendingUpdate;
 
-        public OpenCompositeBar(OpenCompositeCache cache, OperationGate gate, Action<string> addWarning, Action<string> showNotice)
+        public OpenCompositeBar(OpenCompositeCache cache, OperationGate gate, Action<string> addWarning, Action<Func<string, bool>> removeWarnings, Action<string> showNotice)
         {
             this.cache = cache ?? throw new ArgumentNullException(nameof(cache));
             this.gate = gate ?? throw new ArgumentNullException(nameof(gate));
             this.addWarning = addWarning ?? throw new ArgumentNullException(nameof(addWarning));
+            this.removeWarnings = removeWarnings ?? throw new ArgumentNullException(nameof(removeWarnings));
             this.showNotice = showNotice ?? throw new ArgumentNullException(nameof(showNotice));
 
             Dock = DockStyle.Fill;
@@ -189,6 +191,8 @@ namespace GameManager
             try
             {
                 cache.AcceptLicense();
+                // The "license notice has not been accepted" warnings from earlier are no longer true.
+                removeWarnings(OpenCompositeCache.IsLicenseNotAcceptedMessage);
                 return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is SecurityException)

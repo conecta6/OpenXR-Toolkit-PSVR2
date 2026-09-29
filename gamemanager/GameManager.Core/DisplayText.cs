@@ -66,6 +66,26 @@ namespace GameManager.Core
             return string.Join("; ", parts);
         }
 
+        public const int MaxListedFolders = 10;
+
+        /// <summary>
+        /// The first MaxListedFolders folders separated by commas, then " and N more" when there are more, so a game
+        /// with hundreds of unchecked folders does not fill a message box.
+        /// </summary>
+        public static string FolderList(IReadOnlyList<string> folders)
+        {
+            if (folders.Count <= MaxListedFolders)
+            {
+                return string.Join(", ", folders);
+            }
+            var first = new List<string>(MaxListedFolders);
+            for (int i = 0; i < MaxListedFolders; i++)
+            {
+                first.Add(folders[i]);
+            }
+            return string.Join(", ", first) + " and " + (folders.Count - MaxListedFolders).ToString(CultureInfo.InvariantCulture) + " more";
+        }
+
         public static string Compatibility(CompatibilityVerdict verdict)
         {
             if (verdict.Blocked)
@@ -93,7 +113,7 @@ namespace GameManager.Core
             }
             if (verdict.AntiCheatNotRuledOut)
             {
-                parts.Add("Anti-cheat not ruled out: these folders could not be checked: " + string.Join(", ", verdict.UncheckedFolders) + ".");
+                parts.Add("Anti-cheat not ruled out: these folders could not be checked: " + FolderList(verdict.UncheckedFolders) + ".");
             }
             if (verdict.Notes.Length > 0)
             {

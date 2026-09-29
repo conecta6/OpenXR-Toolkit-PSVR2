@@ -374,12 +374,13 @@ namespace GameManager.Core
             {
                 // R30: the hash of the file now in the game folder, never a value from cache.json or the plan.
                 PatchRecord record = change.RecordToSave.WithOpenComposite(FileHash.Sha256(change.DllPath), utcNow());
-                bool iniPlanned = change.Actions.Any(a => a.Kind == PatchActionKind.WriteIni);
-                bool iniWritten = change.Actions.Any(a => a.Kind == PatchActionKind.WriteIni && completed.Contains(a));
-                if (record.IniCreated && iniPlanned && !iniWritten)
+                // The plan's record holds the ini state as it was before. Only a write that really happened changes
+                // it (to "Game Manager wrote this file, and it hashes to X"); a planned write that failed keeps the
+                // old flag and hash, so an ini Game Manager wrote earlier is still recognised as its own.
+                PatchAction iniWrite = change.Actions.FirstOrDefault(a => a.Kind == PatchActionKind.WriteIni && completed.Contains(a));
+                if (iniWrite != null)
                 {
-                    record = new PatchRecord(record.AppId, record.GameName, record.InstallDir, record.DllPath, record.Arch,
-                        record.OriginalSha256, record.OpenCompositeSha256, false, record.PatchedUtc);
+                    record = record.WithIni(true, TryHash(iniWrite.Target, warnings));
                 }
                 state.Put(record);
                 return true;
@@ -388,6 +389,20 @@ namespace GameManager.Core
             {
                 warnings.Add(change.DllPath + " was changed, but could not be read back to record it (" + e.Message + "). Patch the game again to record it; its backup is reused.");
                 return false;
+            }
+        }
+
+        private static string TryHash(string path, List<string> warnings)
+        {
+            try
+            {
+                return FileHash.Sha256(path);
+            }
+            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+            {
+                // Unknown hash: the file is left alone by later Patch and Restore.
+                warnings.Add(path + " was written, but could not be read back to record it (" + e.Message + "). Game Manager will leave it alone from now on.");
+                return null;
             }
         }
 

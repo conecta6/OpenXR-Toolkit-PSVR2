@@ -52,6 +52,37 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void RemoveWhere_RemovesMatchingWarnings_AndTheyCanBeAddedAgain()
+        {
+            var log = new WarningLog();
+            log.Add("a");
+            log.Add("license: not accepted");
+            log.Add("b");
+
+            Assert.AreEqual(1, log.RemoveWhere(w => w.StartsWith("license", System.StringComparison.Ordinal)));
+            Assert.AreEqual(0, log.RemoveWhere(w => w == "nothing"));
+
+            CollectionAssert.AreEqual(new[] { "a", "b" }, new List<string>(log.Items));
+            Assert.IsTrue(log.Add("license: not accepted"));
+            CollectionAssert.AreEqual(new[] { "a", "b", "license: not accepted" }, new List<string>(log.Items));
+        }
+
+        [TestMethod]
+        public void IsLicenseNotAcceptedMessage_MatchesTheCacheMessagesOnly()
+        {
+            using (var fx = new PatchFixture())
+            {
+                // Settings were never saved, so the license is not accepted.
+                DownloadOutcome download = fx.Cache.DownloadAsync(OpenCompositeArch.X64, new List<string>(), System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+
+                Assert.AreEqual(DownloadStatus.LicenseNotAccepted, download.Status);
+                Assert.IsTrue(OpenCompositeCache.IsLicenseNotAcceptedMessage(download.Message));
+                Assert.IsFalse(OpenCompositeCache.IsLicenseNotAcceptedMessage("OpenComposite: offline"));
+                Assert.IsFalse(OpenCompositeCache.IsLicenseNotAcceptedMessage(null));
+            }
+        }
+
+        [TestMethod]
         public void Items_KeepTheOrderFirstSeen()
         {
             var log = new WarningLog();

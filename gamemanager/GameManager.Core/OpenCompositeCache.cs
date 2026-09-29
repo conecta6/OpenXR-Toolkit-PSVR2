@@ -188,6 +188,17 @@ namespace GameManager.Core
             return Path.Combine(paths.OpenCompositeFolder, ArchName(arch));
         }
 
+        private const string LicenseNotAcceptedText = "its license notice has not been accepted";
+
+        /// <summary>
+        /// True for the "license notice has not been accepted" messages of this class, which stop being true once the
+        /// user accepts the notice.
+        /// </summary>
+        public static bool IsLicenseNotAcceptedMessage(string message)
+        {
+            return message != null && message.Contains(LicenseNotAcceptedText);
+        }
+
         public bool IsLicenseAccepted(IList<string> warnings)
         {
             return settings.Load(warnings).OpenCompositeLicenseAccepted;
@@ -237,6 +248,49 @@ namespace GameManager.Core
         }
 
         /// <summary>
+        /// Every OpenComposite SHA-256 this cache has ever downloaded or accepted (lowercase hex), kept in cache.json
+        /// and never pruned, whether or not the DLL is still on disk. PatchPlanner uses it so that an old
+        /// OpenComposite DLL is never taken for a game's original.
+        /// </summary>
+        public IReadOnlyList<string> GetKnownHashes(IList<string> warnings)
+        {
+            var known = new List<string>();
+            foreach (CacheEntryDto entry in ReadCacheFile(warnings).Values)
+            {
+                Remember(entry, entry.Sha256);
+                Remember(entry, entry.PendingSha256);
+                if (entry.KnownSha256 != null)
+                {
+                    foreach (string hash in entry.KnownSha256)
+                    {
+                        if (!known.Contains(hash))
+                        {
+                            known.Add(hash);
+                        }
+                    }
+                }
+            }
+            return known;
+        }
+
+        private static void Remember(CacheEntryDto entry, string sha256)
+        {
+            if (!PatchState.IsSha256(sha256))
+            {
+                return;
+            }
+            string hash = sha256.ToLowerInvariant();
+            if (entry.KnownSha256 == null)
+            {
+                entry.KnownSha256 = new List<string>();
+            }
+            if (!entry.KnownSha256.Contains(hash))
+            {
+                entry.KnownSha256.Add(hash);
+            }
+        }
+
+        /// <summary>
         /// Downloads the latest build of one architecture and makes it the cached one; a waiting update is dropped.
         /// Throws OperationCanceledException only when cancellation is requested; every other problem is a
         /// Failed outcome. A network error or an invalid file never touches the cache.
@@ -245,7 +299,7 @@ namespace GameManager.Core
         {
             if (!IsLicenseAccepted(warnings))
             {
-                return new DownloadOutcome(arch, DownloadStatus.LicenseNotAccepted, "OpenComposite was not downloaded: its license notice has not been accepted.");
+                return new DownloadOutcome(arch, DownloadStatus.LicenseNotAccepted, "OpenComposite was not downloaded: " + LicenseNotAcceptedText + ".");
             }
             FetchResult fetched = await FetchValidatedAsync(arch, cancellation).ConfigureAwait(false);
             if (fetched.Error != null)
@@ -258,12 +312,21 @@ namespace GameManager.Core
                 AtomicFile.Replace(fetched.TempPath, DllPath(arch));
                 AtomicFile.TryDelete(PendingDllPath(arch));
                 Dictionary<string, CacheEntryDto> file = ReadCacheFile(warnings);
-                file[ArchName(arch)] = new CacheEntryDto
+                CacheEntryDto previous;
+                file.TryGetValue(ArchName(arch), out previous);
+                var replacement = new CacheEntryDto
                 {
                     Sha256 = hash,
                     DownloadedUtc = JsonFile.FormatUtc(utcNow()),
                     SourceUrl = SourceUrl(arch),
+                    KnownSha256 = previous?.KnownSha256,
                 };
+                // The replaced build and any waiting one stay known, so an old OpenComposite DLL is never mistaken
+                // for a game's original after patch records are lost.
+                Remember(replacement, previous?.Sha256);
+                Remember(replacement, previous?.PendingSha256);
+                Remember(replacement, hash);
+                file[ArchName(arch)] = replacement;
                 WriteCacheFile(file);
                 return new DownloadOutcome(arch, DownloadStatus.Downloaded, "Downloaded OpenComposite " + ArchName(arch) + " (SHA-256 " + hash + ").");
             }
@@ -441,7 +504,7 @@ namespace GameManager.Core
                     outcomes.Add(new DownloadOutcome(
                         build.Arch,
                         DownloadStatus.LicenseNotAccepted,
-                        "OpenComposite " + ArchName(build.Arch) + " was not checked for a new build: its license notice has not been accepted. Click \"Check for OpenComposite update\" to see it."));
+                        "OpenComposite " + ArchName(build.Arch) + " was not checked for a new build: " + LicenseNotAcceptedText + ". Click \"Check for OpenComposite update\" to see it."));
                 }
                 return outcomes;
             }
@@ -489,6 +552,7 @@ namespace GameManager.Core
                 if (string.Equals(actualHash, entry.PendingSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     entry.Sha256 = entry.PendingSha256;
+                    Remember(entry, entry.Sha256);
                     entry.DownloadedUtc = entry.PendingDownloadedUtc;
                     entry.SourceUrl = SourceUrl(arch);
                     // The new build is already in place (that is why the .new file is gone): a failure saving
@@ -520,6 +584,7 @@ namespace GameManager.Core
                 try
                 {
                     entry.Sha256 = actual;
+                    Remember(entry, actual);
                     entry.DownloadedUtc = entry.PendingDownloadedUtc;
                     entry.SourceUrl = SourceUrl(arch);
                     ClearPending(file, entry, arch);
@@ -560,6 +625,7 @@ namespace GameManager.Core
                     return Failed(arch, "The OpenComposite " + ArchName(arch) + " cache record is missing; download it again.");
                 }
                 entry.Sha256 = current;
+                Remember(entry, current);
 
                 if (string.Equals(latest, current, StringComparison.OrdinalIgnoreCase))
                 {
@@ -570,6 +636,7 @@ namespace GameManager.Core
 
                 AtomicFile.Replace(fetched.TempPath, PendingDllPath(arch));
                 entry.PendingSha256 = latest;
+                Remember(entry, latest);
                 entry.PendingDownloadedUtc = JsonFile.FormatUtc(utcNow());
                 WriteCacheFile(file);
                 return new DownloadOutcome(arch, DownloadStatus.UpdateFound, "A new OpenComposite " + ArchName(arch) + " build is available.");
@@ -693,6 +760,9 @@ namespace GameManager.Core
 
             [DataMember(Name = "pendingDownloadedUtc", EmitDefaultValue = false)]
             public string PendingDownloadedUtc { get; set; }
+
+            [DataMember(Name = "knownSha256", EmitDefaultValue = false)]
+            public List<string> KnownSha256 { get; set; }
         }
     }
 }

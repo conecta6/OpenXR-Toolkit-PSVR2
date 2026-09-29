@@ -28,6 +28,9 @@ cbuffer config : register(b0) {
     float4 Params2;  // ColorGainR, ColorGainG, ColorGainB (-1..+1 params)
     float4 Params3;  // Highlights, Shadows, Vibrance (0..1 params), UseCA (0 = off, 1 = on)
     float4 Params4;  // ChromaticCorrectionR, ChromaticCorrectionG, ChromaticCorrectionB (-1..+1 params), Eye (0 = left, 1 = right)
+    float4 Params5;  // ColorSpace matrix row 0 (linear RGB -> linear RGB), UseColorSpace (0 = off, 1 = on)
+    float4 Params6;  // ColorSpace matrix row 1
+    float4 Params7;  // ColorSpace matrix row 2
 };
 
 SamplerState sourceSampler : register(s0);
@@ -141,6 +144,13 @@ float3 AdjustSaturation(float3 color, float amount) {
   return luminance + (color - luminance) * (amount + 1.0);
 }
 
+// reinterpret the input primaries with a 3x3 matrix, no color management (P3, Adobe RGB, Rec.2020):
+// vivid = treat as the wider space, convert to Rec.709 (stretched)
+// soft = treat as Rec.709, convert to the wider space (muted)
+float3 AdjustColorSpace(float3 color) {
+  return saturate(float3(dot(Params5.xyz, color), dot(Params6.xyz, color), dot(Params7.xyz, color)));
+}
+
 // -1..+1
 float3 AdjustGains(float3 color, float3 gains) {
   return saturate(color * (gains + 1));
@@ -162,6 +172,10 @@ float4 mainPostProcess(in float4 position : SV_POSITION, in float2 texcoord : TE
   color = srgb2linear(color);
  #endif
   
+  // reinterpret the color space.
+  if (Params5.w) {
+    color = AdjustColorSpace(color);
+  }
   // adjust color input gains.
   if (any(Params2.rgb)) {
     color = AdjustGains(color, Params2.rgb);
@@ -215,6 +229,10 @@ float4 mainPassThrough(in float4 position : SV_POSITION, in float2 texcoord : TE
   color = srgb2linear(color);
 #endif
 
+  // reinterpret the color space.
+  if (Params5.w) {
+    color = AdjustColorSpace(color);
+  }
   // adjust color input gains.
   if (any(Params2.rgb)) {
     color = AdjustGains(color, Params2.rgb);

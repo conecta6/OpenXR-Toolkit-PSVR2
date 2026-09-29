@@ -254,6 +254,7 @@ namespace {
             m_configManager->setDefault(config::SettingPostColorGainG, 500);
             m_configManager->setDefault(config::SettingPostColorGainB, 500);
             m_configManager->setDefault(config::SettingPostVibrance, 0);
+            m_configManager->setDefault(config::SettingPostColorSpace, 0);
             m_configManager->setDefault(config::SettingPostHighlights, 1000);
             m_configManager->setDefault(config::SettingPostShadows, 0);
             m_configManager->setDefault(config::SettingPostChromaticCorrectionR, 100090);

@@ -98,6 +98,12 @@ namespace toolkit::config {
     DECLARE_ENUM_TO_STRING_VIEW(VariableShadingRateVal, {"1x", "1/2", "1/4", "1/8", "1/16", "Cull"})
     DECLARE_ENUM_TO_STRING_VIEW(PostProcessType, {"Off", "On", "CA Correction"})
     DECLARE_ENUM_TO_STRING_VIEW(PostSunGlassesType, {"Off", "Light", "Dark", "TruNite"})
+    DECLARE_ENUM_TO_STRING_VIEW(PostColorSpaceType, {"Normal",
+                                                    "Rec.2020 (vivid)",
+                                                    "Rec.2020 (strong)",
+                                                    "Rec.2020 (medium)",
+                                                    "Rec.2020 (soft)"})
+    // Disabled for now: "P3 (vivid)", "P3 (soft)", "Adobe RGB (vivid)", "Adobe RGB (soft)"
     DECLARE_ENUM_TO_STRING_VIEW(FovModeType, {"Simple", "Advanced"})
     DECLARE_ENUM_TO_STRING_VIEW(ScreenshotFileFormat, {"DDS", "PNG", "JPG", "BMP"})
     DECLARE_ENUM_TO_STRING_VIEW(BlindEye, {"None", "Left", "Right"})

@@ -1205,6 +1205,14 @@ namespace {
                            getCurrentScalingType() == ScalingType::CAS;
                 });
                 m_menuEntries.push_back({MenuIndent::SubGroupIndent,
+                                         "Sharpness",
+                                         MenuEntryType::Slider,
+                                         SettingSharpness,
+                                         0,
+                                         100,
+                                         MenuEntry::FmtPercent});
+
+                m_menuEntries.push_back({MenuIndent::SubGroupIndent,
                                          "Anamorphic",
                                          MenuEntryType::Choice,
                                          "",
@@ -1257,14 +1265,6 @@ namespace {
                      }});
                 m_menuEntries.back().noCommitDelay = true;
                 anamorphicGroup.finalize();
-
-                m_menuEntries.push_back({MenuIndent::SubGroupIndent,
-                                         "Sharpness",
-                                         MenuEntryType::Slider,
-                                         SettingSharpness,
-                                         0,
-                                         100,
-                                         MenuEntry::FmtPercent});
 
                 // TODO: Mip-map biasing is only supported on D3D11.
                 if (m_device->getApi() == Api::D3D11) {
@@ -1609,6 +1609,13 @@ namespace {
                                      MenuEntry::FmtDecimal<3, -100000>});
             m_menuEntries.back().acceleration = 5;
             caCorrectionGroup.finalize();
+            m_menuEntries.push_back({MenuIndent::OptionIndent,
+                                     "Color space",
+                                     MenuEntryType::Choice,
+                                     SettingPostColorSpace,
+                                     0,
+                                     MenuEntry::LastVal<PostColorSpaceType>(),
+                                     MenuEntry::FmtEnum<PostColorSpaceType>});
 
             m_menuEntries.push_back(
                 {MenuIndent::OptionIndent, "World scale", MenuEntryType::Slider, SettingICD, 1, 10000, [&](int value) {

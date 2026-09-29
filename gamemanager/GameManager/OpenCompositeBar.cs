@@ -81,6 +81,11 @@ namespace GameManager
         }
 
         /// <summary>
+        /// Raised after a download or an accepted update changed the cached DLLs, so "Update available" is read again.
+        /// </summary>
+        public event EventHandler CacheChanged;
+
+        /// <summary>
         /// Stops a running download or check. Called when the window closes.
         /// </summary>
         public void CancelPendingWork()
@@ -236,6 +241,10 @@ namespace GameManager
             }
 
             RefreshState(warnings);
+            if (outcomes.Any(o => o.Status == DownloadStatus.Downloaded || o.Status == DownloadStatus.UpdateAccepted))
+            {
+                CacheChanged?.Invoke(this, EventArgs.Empty);
+            }
             foreach (DownloadOutcome outcome in outcomes)
             {
                 if (outcome.Status == DownloadStatus.Failed || outcome.Status == DownloadStatus.LicenseNotAccepted)

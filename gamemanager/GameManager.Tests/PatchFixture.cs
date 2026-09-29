@@ -138,6 +138,47 @@ namespace GameManager.Tests
             return string.Join("\n", lines);
         }
 
+        /// <summary>
+        /// Another game folder in the same temporary library.
+        /// </summary>
+        public SteamGame AddGame(int appId, string name)
+        {
+            string folder = PathUtil.NormalizeDirectory(Temp.CreateDirectory(@"Library\steamapps\common\" + name));
+            return new SteamGame(appId, name, folder, Temp.PathOf("Library"));
+        }
+
+        public static string WriteFileIn(SteamGame game, string relativePath, byte[] content)
+        {
+            string path = Path.Combine(game.InstallDir, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllBytes(path, content);
+            return path;
+        }
+
+        /// <summary>
+        /// Any game classified from disk; verdict null means "as a scan would see it".
+        /// </summary>
+        public GameEntry ScanOf(SteamGame game, CompatibilityVerdict verdict)
+        {
+            GameClassification classification = GameClassifier.Classify(game.InstallDir);
+            return new GameEntry(game, classification, verdict ?? CompatibilityVerdict.For(null, classification.AntiCheatMarkers, classification.UncheckedFolders));
+        }
+
+        public static bool CanOpenForWrite(string path)
+        {
+            try
+            {
+                using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    return true;
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
         public void Dispose()
         {
             Temp.Dispose();

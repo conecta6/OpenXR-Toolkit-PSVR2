@@ -89,6 +89,42 @@ namespace GameManager.Core
         }
     }
 
+    public sealed class BatchResult
+    {
+        internal BatchResult(
+            IReadOnlyList<ApplyResult> results,
+            IReadOnlyList<string> skipped,
+            bool needsElevation,
+            string message,
+            IReadOnlyList<string> warnings)
+        {
+            Results = results;
+            Skipped = skipped;
+            NeedsElevation = needsElevation;
+            Message = message;
+            Warnings = warnings;
+        }
+
+        /// <summary>
+        /// One result per plan that was run (or simulated), in order.
+        /// </summary>
+        public IReadOnlyList<ApplyResult> Results { get; }
+
+        /// <summary>
+        /// Games not run, each with the reason.
+        /// </summary>
+        public IReadOnlyList<string> Skipped { get; }
+
+        public bool NeedsElevation { get; }
+        public string Message { get; }
+        public IReadOnlyList<string> Warnings { get; }
+
+        public bool ChangedSomething
+        {
+            get { return Results.Any(r => r.ChangedSomething); }
+        }
+    }
+
     /// <summary>
     /// Runs plans (R16). Simulation mode returns before anything runs. Otherwise a blocked or unconfirmed plan is
     /// refused, the executor runs the steps behind the running-game guard, and every DllChange that completed is
@@ -186,6 +222,72 @@ namespace GameManager.Core
             }
             text.Append(NotesText(plan));
             return new ApplyResult(plan, ApplyOutcome.Failed, run.CompletedActions, run.NeedsElevation, text.ToString(), warnings);
+        }
+
+        /// <summary>
+        /// R24/R25: runs several games' plans one after another ("Re-patch all unpatched", "Update all"). A batch never
+        /// asks questions: a plan that needs a confirmation (anti-cheat not ruled out, an unexpected backup) or has
+        /// blockers is skipped with its reason, to be done alone with Patch. One game failing does not stop the others,
+        /// except a permission error, which every following game would hit too.
+        /// </summary>
+        public BatchResult ApplyAll(IReadOnlyList<PatchPlan> plans, bool simulation)
+        {
+            if (plans == null)
+            {
+                throw new ArgumentNullException(nameof(plans));
+            }
+            var results = new List<ApplyResult>();
+            var skipped = new List<string>();
+            var warnings = new List<string>();
+            var lines = new List<string>();
+            bool needsElevation = false;
+            foreach (PatchPlan plan in plans)
+            {
+                string title = DisplayText.OperationTitle(plan);
+                if (!plan.CanRun)
+                {
+                    skipped.Add(title + ": skipped. " + string.Join(" ", plan.Blockers));
+                    continue;
+                }
+                if (!plan.HasWork)
+                {
+                    continue;
+                }
+                if (plan.NeedsConfirmation)
+                {
+                    skipped.Add(title + ": skipped, because it needs your confirmation; select the game and click Patch. " + string.Join(" ", plan.Confirmations));
+                    continue;
+                }
+                ApplyResult result = Apply(plan, false, simulation);
+                results.Add(result);
+                warnings.AddRange(result.Warnings);
+                lines.Add(simulation ? DisplayText.PlanSummary(plan) : result.Message);
+                if (result.NeedsElevation)
+                {
+                    needsElevation = true;
+                    skipped.Add("Any games after " + plan.Game.Name + " were not changed: Windows denied access, and they would fail the same way.");
+                    break;
+                }
+            }
+
+            var text = new StringBuilder();
+            if (simulation)
+            {
+                text.Append("Simulation - nothing was changed.").Append(NL).Append(NL);
+            }
+            if (lines.Count > 0)
+            {
+                text.Append(string.Join(NL + NL, lines));
+            }
+            else
+            {
+                text.Append(skipped.Count > 0 ? "Nothing was changed." : "Nothing to do.");
+            }
+            if (skipped.Count > 0)
+            {
+                text.Append(NL).Append(NL).Append("Skipped:").Append(NL).Append(Bullets(skipped));
+            }
+            return new BatchResult(results, skipped, needsElevation, text.ToString(), warnings);
         }
 
         private void Record(PatchPlan plan, ExecutionResult run, PatchState state, List<string> warnings)

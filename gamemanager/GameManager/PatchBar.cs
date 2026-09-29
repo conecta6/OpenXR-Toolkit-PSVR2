@@ -22,6 +22,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GameManager.Core;
@@ -45,6 +46,9 @@ namespace GameManager
         private readonly CheckBox writeIniBox;
         private readonly NumericUpDown ratioBox;
         private readonly CheckBox simulationBox;
+        private readonly Button repatchAllButton;
+        private readonly Button updateAllButton;
+        private IReadOnlyList<GamePatchStatus> allStatuses = new GamePatchStatus[0];
         private GameEntry selectedEntry;
         private GamePatchStatus selectedStatus;
         private bool running;
@@ -65,6 +69,10 @@ namespace GameManager
             patchButton.Click += OnPatchClick;
             restoreButton = new Button { Text = "Restore", AutoSize = true };
             restoreButton.Click += OnRestoreClick;
+            repatchAllButton = new Button { AutoSize = true, Visible = false };
+            repatchAllButton.Click += OnRepatchAllClick;
+            updateAllButton = new Button { AutoSize = true, Visible = false };
+            updateAllButton.Click += OnUpdateAllClick;
             writeIniBox = new CheckBox { Text = "Write opencomposite.ini", AutoSize = true, Margin = new Padding(16, 6, 3, 0) };
             var ratioLabel = new Label { Text = "supersampleRatio", AutoSize = true, Margin = new Padding(3, 8, 3, 0) };
             ratioBox = new NumericUpDown
@@ -78,11 +86,13 @@ namespace GameManager
                 Enabled = false,
                 Margin = new Padding(3, 5, 3, 0),
             };
-            writeIniBox.CheckedChanged += (sender, e) => ratioBox.Enabled = writeIniBox.Checked;
+            writeIniBox.CheckedChanged += (sender, e) => RefreshButtons();
             simulationBox = new CheckBox { Text = "Simulation - do not change files", AutoSize = true, Margin = new Padding(16, 6, 3, 0) };
 
             Controls.Add(patchButton);
             Controls.Add(restoreButton);
+            Controls.Add(repatchAllButton);
+            Controls.Add(updateAllButton);
             Controls.Add(writeIniBox);
             Controls.Add(ratioLabel);
             Controls.Add(ratioBox);
@@ -120,11 +130,33 @@ namespace GameManager
             RefreshButtons();
         }
 
+        /// <summary>
+        /// R24: every game's status after a scan or an operation; shows "Re-patch all unpatched (N)" and
+        /// "Update all (N)" when there is something to offer.
+        /// </summary>
+        public void SetStatuses(IReadOnlyList<GamePatchStatus> statuses)
+        {
+            allStatuses = statuses ?? new GamePatchStatus[0];
+            RefreshButtons();
+        }
+
         private void RefreshButtons()
         {
             bool free = !gate.IsBusy;
             patchButton.Enabled = free && PatchAvailability.CanPatch(selectedEntry);
             restoreButton.Enabled = free && PatchAvailability.CanRestore(selectedStatus);
+            int unpatched = PatchBatch.Unpatched(allStatuses).Count;
+            int updatable = PatchBatch.Updatable(allStatuses).Count;
+            repatchAllButton.Text = "Re-patch all unpatched (" + unpatched + ")";
+            repatchAllButton.Visible = unpatched > 0;
+            repatchAllButton.Enabled = free;
+            updateAllButton.Text = "Update all (" + updatable + ")";
+            updateAllButton.Visible = updatable > 0;
+            updateAllButton.Enabled = free;
+            // The options are read when an operation starts; changing them while it runs would mislead.
+            writeIniBox.Enabled = free;
+            ratioBox.Enabled = free && writeIniBox.Checked;
+            simulationBox.Enabled = free;
         }
 
         private void OnGateChanged(object sender, EventArgs e)
@@ -173,6 +205,90 @@ namespace GameManager
             await RunAsync("Restore", warnings => planner.PlanRestore(entry, warnings));
         }
 
+        private async void OnRepatchAllClick(object sender, EventArgs e)
+        {
+            // R24: patched again with no ini change; each record keeps whether Game Manager created the ini.
+            IReadOnlyList<GamePatchStatus> targets = PatchBatch.Unpatched(allStatuses);
+            await RunBatchAsync("Re-patch all unpatched", warnings => targets.Select(s => planner.PlanPatch(s.Entry, PatchOptions.None, warnings)).ToList());
+        }
+
+        private async void OnUpdateAllClick(object sender, EventArgs e)
+        {
+            // R25: only the OpenComposite DLL is replaced; the .bak is never touched.
+            IReadOnlyList<GamePatchStatus> targets = PatchBatch.Updatable(allStatuses);
+            await RunBatchAsync("Update all", warnings => targets.Select(s => planner.PlanUpdate(s.Entry, warnings)).ToList());
+        }
+
+        /// <summary>
+        /// Plans every game inside the gate, runs them with PatchService.ApplyAll (simulation honoured; games that
+        /// need a question are skipped), shows the summary, and offers an elevated relaunch on a permission error.
+        /// The lease is taken and released here, on the UI thread, and the window will not close meanwhile (P1).
+        /// </summary>
+        private async Task RunBatchAsync(string operation, Func<List<string>, IReadOnlyList<PatchPlan>> makePlans)
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            IDisposable lease = gate.TryEnter(operation);
+            if (lease == null)
+            {
+                showNotice(BusyNotice());
+                return;
+            }
+            running = true;
+            bool relaunch = false;
+            var warnings = new List<string>();
+            try
+            {
+                bool simulation = simulationBox.Checked;
+                // Planned inside the gate, so the cached DLL cannot change between planning and copying (R33).
+                BatchResult result = await Task.Run(() => service.ApplyAll(makePlans(warnings), simulation));
+                warnings.AddRange(result.Warnings);
+                if (IsDisposed)
+                {
+                    return;
+                }
+                PlanTextDialog.ShowText(FindForm(), simulation ? "Simulation - nothing was changed" : operation, result.Message);
+                if (result.ChangedSomething)
+                {
+                    StatusesChanged?.Invoke(this, EventArgs.Empty);
+                }
+                if (result.NeedsElevation)
+                {
+                    relaunch = ElevatedRelaunch.Offer(FindForm(), result.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                // async void callers must never let an exception escape: that would close the app.
+                warnings.Add(operation + ": " + ex.Message);
+                // Files may have changed before the failure: read the statuses again.
+                StatusesChanged?.Invoke(this, EventArgs.Empty);
+            }
+            finally
+            {
+                running = false;
+                lease.Dispose();
+                if (!IsDisposed)
+                {
+                    foreach (string warning in warnings)
+                    {
+                        addWarning(warning);
+                    }
+                }
+            }
+            if (relaunch)
+            {
+                RelaunchStarted?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private string BusyNotice()
+        {
+            return "Another operation is running (" + gate.CurrentOperation + "). Try again when it finishes.";
+        }
+
         /// <summary>
         /// Plan (inside the gate), ask the plan's questions (default No), apply (or only show, in simulation mode),
         /// show the result, and offer an elevated relaunch when Windows denied a write. The lease is taken and
@@ -187,7 +303,7 @@ namespace GameManager
             IDisposable lease = gate.TryEnter(operation);
             if (lease == null)
             {
-                showNotice("Another operation is running (" + gate.CurrentOperation + "). Try again when it finishes.");
+                showNotice(BusyNotice());
                 return;
             }
             running = true;

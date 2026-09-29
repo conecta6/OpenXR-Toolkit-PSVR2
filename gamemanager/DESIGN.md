@@ -1,7 +1,7 @@
 # Game Manager — design
 
-Status: phases 1–4 implemented (game list, compatibility list and anti-cheat block, OpenComposite download and
-new-build check); phases 5–7 pending.
+Status: phases 1–6 implemented (game list, compatibility list and anti-cheat block, OpenComposite download and
+new-build check, patch and restore, post-update detection and Update all); phase 7 pending.
 
 ## Purpose
 
@@ -29,8 +29,8 @@ In scope (v1):
 4. Patch: back up the original DLL as `openvr_api.dll.bak`, copy the OpenComposite DLL of the matching
    architecture, optionally write `opencomposite.ini`.
 5. Restore the original DLL.
-6. On startup, detect patched games whose DLL was restored by a Steam update (hash comparison) and offer to
-   re-patch them.
+6. After every scan, detect patched games whose DLL was restored by a Steam update (hash comparison) and offer
+   to re-patch them.
 7. Compatibility list in JSON (works / broken / anti-cheat). Anti-cheat games cannot be patched.
 8. OpenComposite updates: detect that upstream published a newer build than the cached one, and update every
    patched game to it in one click.
@@ -88,12 +88,17 @@ Core units, each with one purpose and testable on its own:
 | `AppDataPaths` | Resolve the per-user app-data root under `%LOCALAPPDATA%` and its subpaths (`settings.json`, the `opencomposite` folder); only `Program.cs` calls `ForCurrentUser` | nothing |
 | `SettingsStore` | Load and save `settings.json` (OpenComposite license acceptance and its timestamp, last update-check time) | `JsonFile` |
 | `FileHash` | SHA-256 of a file on disk | nothing |
-| `AtomicFile` / `JsonFile` | Atomic file replace and delete; DataContractJsonSerializer-based JSON read and write (BOM-less UTF-8, `UseSimpleDictionaryFormat`). The only place in Core allowed to call `File.Write*`/`Directory.CreateDirectory`-style APIs, besides `OpenCompositeCache` and `HttpDownloader` | file system |
+| `AtomicFile` / `JsonFile` | Atomic file replace and delete; DataContractJsonSerializer-based JSON read and write (BOM-less UTF-8, `UseSimpleDictionaryFormat`). The only place in Core allowed to call `File.Write*`/`Directory.CreateDirectory`-style APIs, besides `OpenCompositeCache`, `HttpDownloader` and `PatchExecutor` (the only writer into game folders) | file system |
 | `HttpDownloader` | Download a URL to a file over HTTPS; rejects a response body shorter than its declared Content-Length. The only source of network I/O in Core | `System.Net.Http` |
 | `OpenCompositeCache` | The per-user OpenComposite cache (R11–R14): download and validate a build, gate downloads on license acceptance, check upstream for a new build, and accept a pending update | `AppDataPaths`, `SettingsStore`, `HttpDownloader`, `FileHash`, `AtomicFile`, `JsonFile`, `PeReader` |
-
-Later phases add, in Core: `PatchPlanner`,
-`PatchExecutor`, `PatchStateStore`, `RunningGameGuard`.
+| `OperationGate` | One operation at a time (R33): patch, restore, the batches and the OpenComposite download/check/accept. Taken and released on the UI thread; the window will not close while a patch, restore or batch holds it | nothing |
+| `WarningLog` | The window's operation warnings, each shown once (R35) | nothing |
+| `PatchStateStore` (`PatchState.cs`) | `state.json`: one record per patched DLL, keyed by its full path (R4, R20). A corrupt file is kept as `state.json.corrupt-<time>`; when invalid records are skipped, the file as it was is first copied to `state.json.skipped-<time>`; a file that cannot be read is never overwritten | `JsonFile`, `AtomicFile` |
+| `RunningGameGuard` | Refuses when a running process's executable is under the install folder (or under a junction's target), or a target DLL cannot be opened for exclusive write (R19); `WindowsProcessImageSource` lists processes with `QueryFullProcessImageName` | P/Invoke |
+| `OpenCompositeIni` | The allow-listed `opencomposite.ini` text (R21) | nothing |
+| `PatchStatusRules`, `PatchBatch`, `PatchAvailability` | Per-DLL and per-game patch status, which games "Re-patch all" and "Update all" cover, and when Patch and Restore are enabled (R23, R24, R36) | nothing |
+| `PatchPlanner` | Read-only with respect to game folders: builds Patch, Restore and Update plans and the per-game statuses (R15–R18, R24, R25, R29) | `OpenCompositeCache`, `PatchStateStore`, `PeReader`, `FileHash` |
+| `PatchExecutor` / `PatchService` | Runs a plan's steps behind the guard, stops at the first failure, records each completed DLL with the hash of the file actually written (R16, R30); `ApplyAll` runs a batch; simulation returns before anything runs | `RunningGameGuard`, `PatchStateStore`, `AtomicFile` |
 
 The UI only calls Core. The future overlay will be a second front end over the same Core, plus a settings
 writer for the toolkit's per-application registry keys (`HKCU\SOFTWARE\OpenXR_Toolkit\<app>`).
@@ -123,13 +128,39 @@ thread.
   restore file). Simulation mode shows the plan and stops. Normal mode executes the same plan. There is no
   code path that writes without a plan.
 - Backup: the original is copied to `openvr_api.dll.bak` and the copy's SHA-256 is verified before the
-  original is replaced. If a `.bak` already exists and its hash differs from the current DLL, the operation
-  stops and asks the user.
+  original is replaced. An existing `.bak` that already holds the current DLL is reused, never overwritten.
+- A file the rules above cannot place is never discarded: an existing `.bak` that differs from the current DLL is,
+  after a question (default No), kept as `openvr_api.dll.bak.old-<UTC time>` (copied, hash-verified, only then
+  removed) and the current DLL becomes the new `.bak`; at Restore, a current DLL that is neither the original nor a
+  known OpenComposite build is, after a question (default No), kept as `openvr_api.dll.replaced-<UTC time>`.
+  A DLL that is already OpenComposite without a record is patched only if a `.bak` with a real original sits next
+  to it; otherwise the game is blocked, because an OpenComposite DLL must never become "the original".
+  Batches ("Re-patch all", "Update all") never ask: such games are skipped and reported.
+- Restore (R18, R36): puts the original back from the `.bak`, verifies it, then deletes the `.bak` and an
+  `opencomposite.ini` Game Manager created (an ini it did not create is never touched). Any known OpenComposite
+  build is replaced without a question, since that loses nothing. Restore stays enabled for a patched game that is
+  blocked or no longer OpenVR (R36): getting back to the original is always the safer direction.
+- Anti-cheat confirmation (R29): when a game's folders could not all be checked for anti-cheat files
+  (`UncheckedFolders`, for example an unreadable subfolder or a junction), Patch says so and asks (default No);
+  it is read from the verdict, never from warning text. A blocked game is never patched or updated.
 - Running game guard: before any write, refuse if a running process's executable is under the game's
-  install folder, and refuse if the target DLL cannot be opened for exclusive write.
-- State: per game, the SHA-256 of the original DLL and of the installed OpenComposite DLL, stored in
-  `%LOCALAPPDATA%\OpenXR-Toolkit-PSVR2\GameManager\state.json`. On startup, a patched game whose current
-  DLL hash equals the original hash again is reported as "unpatched by an update".
+  install folder, and refuse if the target DLL cannot be opened for exclusive write. A denied permission is
+  detected here before anything is written, and then offers a relaunch as administrator behind a Yes/No box
+  (default No, R22); Game Manager never elevates by itself.
+- One operation at a time (R33): patch, restore, both batches and the OpenComposite download/check/accept share
+  one `OperationGate`. A plan is built inside the gate, so the cached DLL cannot change between planning and
+  copying; the cached DLL is validated and hashed again when the plan is built (R32, R34).
+- State: per DLL, the SHA-256 of the original and of the installed OpenComposite DLL, stored in
+  `%LOCALAPPDATA%\OpenXR-Toolkit-PSVR2\GameManager\state.json` (an app-data path, the only per-user root, resolved
+  by `AppDataPaths.ForCurrentUser` from `Program.cs`). The OpenComposite hash stored is that of the file actually
+  written (R30). After every scan and every operation each record is checked against the file on disk: the
+  original again is "Unpatched by update", a different file is "Changed externally" (a warning, no automatic
+  action), a missing DLL is "Changed externally" with the record kept, and a recorded build older than the
+  accepted cached one is "Update available". A build still waiting as `openvr_api.dll.new` does not count until
+  the user accepts it. Simulation runs no step; loading a corrupt `state.json` may still rename it inside the
+  app-data folder (R20), and no simulation writes into a game folder.
+- Nothing writes to the registry. Only `PatchExecutor` writes into game folders, and only the steps of a plan; the
+  window never writes a file itself.
 - Anti-cheat: a game is blocked if the compatibility list marks it `anticheat`, or if its folder contains
   known anti-cheat markers, matched by name ignoring case anywhere under the install folder during the same
   single walk as classification: an `EasyAntiCheat`, `EasyAntiCheat_EOS` or `BattlEye` folder, or an
@@ -140,7 +171,11 @@ thread.
 - Updating OpenComposite in a patched game replaces only the OpenComposite DLL. The `.bak` file is the game's
   original DLL and is never overwritten by an update. Before replacing, the manager checks that the current
   DLL hash equals the OpenComposite hash it recorded for that game; if not (for example Steam restored the
-  original), the game is handled as "unpatched by an update" instead.
+  original), that DLL is left alone with a note and shows as "Unpatched by update" (or "Changed externally"),
+  to be handled by Re-patch all or Restore. "Update all" plans only the verify, copy and verify steps of the
+  OpenComposite DLL, so the `.bak` never appears in an update plan.
+- `opencomposite.ini` sits next to each patched `openvr_api.dll` (OpenComposite reads it from that folder) as the
+  single line `supersampleRatio=<value>`. An ini Game Manager did not create is never overwritten.
 
 ## OpenComposite: source and license
 
@@ -171,9 +206,11 @@ Each phase ends with a stop for testing on a real library.
 2. **Classify** — `PeReader`, `GameClassifier`; type and DLL architecture columns. Phases 1–2 are read-only.
 3. **Compatibility list and anti-cheat block** — `compatibility.json`, `AntiCheatDetector`.
 4. **Download OpenComposite** — cache folder, SHA-256 record, license notice, new-build check.
-5. **Patch and restore** — planner, executor, simulation mode, running-game guard, state store.
-6. **Post-update detection** — startup hash check and re-patch offer for games Steam unpatched, and
-   "Update all" when a new OpenComposite build is available.
+5. **Patch and restore** — planner, executor, simulation mode, running-game guard, state store; Patch and Restore
+   buttons for the selected game, the optional `opencomposite.ini`, the result and question dialogs.
+6. **Post-update detection** — after every scan, a hash check of each patched DLL (Status column and tooltips),
+   "Re-patch all unpatched (N)" for games Steam unpatched, and "Update all (N)" when an accepted OpenComposite
+   build is newer than the installed one. The status line says how many games each button covers.
 7. **Docs and release** — user guide, add the manager to the release ZIP, pull request.
 
 ## Testing
@@ -188,4 +225,5 @@ tested by hand on a real Steam library.
 - Whether the layer re-reads its registry settings while a game runs (needed for the overlay to take effect
   live). Unverified.
 - Whether writing into a Steam library under `Program Files (x86)` needs elevation on a default install. The
-  manager will run unelevated and offer to relaunch elevated only if a write is denied.
+  manager runs unelevated and offers to relaunch elevated only if a write is denied; whether that is ever needed
+  on a default install is still unverified.

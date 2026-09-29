@@ -200,6 +200,95 @@ namespace GameManager.Core
             return plan.Build();
         }
 
+        /// <summary>
+        /// R25: replaces the OpenComposite DLL of every record whose DLL is still the build Game Manager installed,
+        /// when the accepted cached build differs. The .bak (the game's original) is never part of the plan. A record in
+        /// any other state is left alone with a note (a DLL Steam put back is "Unpatched by update", handled by
+        /// Re-patch all; anything else by Patch or Restore).
+        /// </summary>
+        public PatchPlan PlanUpdate(GameEntry entry, IList<string> warnings)
+        {
+            if (entry == null)
+            {
+                throw new ArgumentNullException(nameof(entry));
+            }
+            if (warnings == null)
+            {
+                throw new ArgumentNullException(nameof(warnings));
+            }
+            var plan = new PlanBuilder(PatchOperation.Update, entry.Game);
+            if (entry.Compatibility.Blocked)
+            {
+                plan.Blockers.Add("This game is blocked: " + entry.Compatibility.Reason + " It is not updated; use Restore to remove OpenComposite from it.");
+                return plan.Build();
+            }
+            AddAntiCheatQuestion(plan, entry);
+            Inputs inputs = LoadInputs(warnings);
+            List<PatchRecord> records = RecordsOf(inputs.State, entry.Game);
+            if (records.Count == 0)
+            {
+                plan.Blockers.Add("Game Manager has no record of patching this game, so there is nothing to update.");
+                return plan.Build();
+            }
+            foreach (PatchRecord record in records)
+            {
+                PlanUpdateDll(plan, entry.Game, record, inputs);
+            }
+            return plan.Build();
+        }
+
+        private void PlanUpdateDll(PlanBuilder plan, SteamGame game, PatchRecord record, Inputs inputs)
+        {
+            string relative = PathUtil.Relative(game.InstallDir, record.DllPath);
+            string archName = OpenCompositeCache.ArchName(record.Arch);
+            if (!File.Exists(record.DllPath))
+            {
+                plan.Notes.Add(relative + ": missing, so it was not updated.");
+                return;
+            }
+            string current;
+            try
+            {
+                current = FileHash.Sha256(record.DllPath);
+            }
+            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+            {
+                plan.Blockers.Add(relative + " could not be read (" + e.Message + "). Close the game and try again.");
+                return;
+            }
+            if (!Same(current, record.OpenCompositeSha256))
+            {
+                plan.Notes.Add(relative + ": not updated, because it is no longer the OpenComposite build Game Manager installed ("
+                    + DisplayText.StatusText(PatchStatusRules.Evaluate(record, current, null)) + ").");
+                return;
+            }
+            string problem;
+            if (inputs.CacheProblem.TryGetValue(record.Arch, out problem))
+            {
+                plan.Blockers.Add(CacheProblemBlocker(archName, problem));
+                return;
+            }
+            string target;
+            if (!inputs.CachedHash.TryGetValue(record.Arch, out target))
+            {
+                plan.Notes.Add(relative + ": OpenComposite " + archName + " is not downloaded, so it was not updated.");
+                return;
+            }
+            if (Same(current, target))
+            {
+                plan.Notes.Add(relative + ": already has the current OpenComposite build.");
+                return;
+            }
+            var actions = new List<PatchAction>
+            {
+                PatchAction.Verify(record.DllPath, current),
+                PatchAction.Copy(cache.DllPath(record.Arch), record.DllPath, target),
+                PatchAction.Verify(record.DllPath, target),
+            };
+            // The original stays as recorded; the OpenComposite hash is replaced by that of the written file (R30).
+            plan.Changes.Add(new DllChange(record.DllPath, actions, record.WithOpenComposite(target, utcNow()), false));
+        }
+
         private static PatchStatus EvaluateOnDisk(SteamGame game, PatchRecord record, Dictionary<OpenCompositeArch, string> cachedHash, IList<string> warnings)
         {
             if (!File.Exists(record.DllPath))

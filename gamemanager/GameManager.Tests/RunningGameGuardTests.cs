@@ -117,7 +117,7 @@ namespace GameManager.Tests
             File.SetAccessControl(dll, security);
             try
             {
-                if (CanOpenForWrite(dll))
+                if (PatchFixture.CanOpenForWrite(dll))
                 {
                     Assert.Inconclusive("A deny ACL did not block writing for this account.");
                 }
@@ -237,21 +237,6 @@ namespace GameManager.Tests
             GuardResult result = real.Check(hostFolder, new string[0]);
 
             Assert.AreEqual(GuardVerdict.GameRunning, result.Verdict);
-        }
-
-        private static bool CanOpenForWrite(string path)
-        {
-            try
-            {
-                using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-                {
-                    return true;
-                }
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return false;
-            }
         }
     }
 }

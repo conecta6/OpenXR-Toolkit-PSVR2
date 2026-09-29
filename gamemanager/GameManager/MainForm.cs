@@ -25,6 +25,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -65,8 +66,20 @@ namespace GameManager
         private IReadOnlyList<GameEntry> lastEntries = new GameEntry[0];
         private IReadOnlyList<GamePatchStatus> lastStatuses = new GamePatchStatus[0];
         private string scanSummary = "";
+
+        // False for the "Steam was not found" line, which has no warning count.
+        private bool summaryHasWarningCount;
         private CancellationTokenSource scanCancellation;
         private bool statusRefreshWaitsForScan;
+
+        // Set once a scan has put a list on screen; a queued status refresh has nothing to refresh without one.
+        private bool scanProducedList;
+
+        // The newest status read wins: an older one that finishes late must not overwrite it.
+        private int statusSequence;
+
+        // Counts notices, so a status read knows whether one appeared while it was reading and must not be covered.
+        private int noticeSequence;
 
         public MainForm(SteamLocator locator, string compatibilityPath, OpenCompositeCache openComposite, PatchPlanner planner, PatchService patchService)
         {
@@ -130,6 +143,8 @@ namespace GameManager
             patchBar = new PatchBar(planner, patchService, gate, AddWarning, ShowNotice);
             patchBar.StatusesChanged += OnStatusesChanged;
             patchBar.RelaunchStarted += OnRelaunchStarted;
+            openCompositeBar.CacheChanged += OnStatusesChanged;
+            gate.Changed += OnGateChanged;
 
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -174,12 +189,47 @@ namespace GameManager
             if (patchBar.IsOperationRunning)
             {
                 e.Cancel = true;
-                ShowNotice("A patch or restore is running. Wait until it finishes, then close the window.");
+                ShowNotice("A patch, restore or update is running. Wait until it finishes, then close the window.");
                 return;
             }
             // R5: stop a running scan between two games instead of letting it walk the rest of the library.
             scanCancellation?.Cancel();
             openCompositeBar.CancelPendingWork();
+            gate.Changed -= OnGateChanged;
+        }
+
+        private void OnGateChanged(object sender, EventArgs e)
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            if (InvokeRequired)
+            {
+                // The gate can change on any thread that releases a lease.
+                if (IsHandleCreated)
+                {
+                    try
+                    {
+                        BeginInvoke(new Action(() => OnGateChanged(sender, e)));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // The window closed between the check and the call.
+                    }
+                }
+                return;
+            }
+            RefreshRefreshButton();
+        }
+
+        /// <summary>
+        /// Refresh reads state.json and the game folders; it stays off while an operation writes them (R33) and while
+        /// a scan runs.
+        /// </summary>
+        private void RefreshRefreshButton()
+        {
+            refreshButton.Enabled = scanCancellation == null && !gate.IsBusy;
         }
 
         private void OnRelaunchStarted(object sender, EventArgs e)
@@ -207,6 +257,7 @@ namespace GameManager
         {
             if (!IsDisposed)
             {
+                noticeSequence++;
                 statusLabel.Text = text;
             }
         }
@@ -215,16 +266,19 @@ namespace GameManager
         {
             var cancellation = new CancellationTokenSource();
             scanCancellation = cancellation;
+            scanProducedList = false;
+            statusSequence++;
             var listWarnings = new List<string>();
             var scanStatusWarnings = new List<string>();
             try
             {
-                refreshButton.Enabled = false;
+                RefreshRefreshButton();
                 statusLabel.Text = "Scanning…";
                 gameList.Items.Clear();
                 lastEntries = new GameEntry[0];
                 lastStatuses = new GamePatchStatus[0];
                 patchBar.SetSelection(null, null);
+                patchBar.SetStatuses(null);
                 // F4: only the scan's own warnings and the status warnings are cleared here; operationWarnings survives
                 // and is re-appended.
                 lastScanWarnings = new string[0];
@@ -250,6 +304,7 @@ namespace GameManager
                     return (scanned, read);
                 });
                 ShowResult(result, statuses, listWarnings, scanStatusWarnings);
+                scanProducedList = true;
             }
             catch (OperationCanceledException)
             {
@@ -274,24 +329,53 @@ namespace GameManager
                 cancellation.Dispose();
                 if (!IsDisposed)
                 {
-                    refreshButton.Enabled = true;
+                    RefreshRefreshButton();
                 }
             }
             if (statusRefreshWaitsForScan && !IsDisposed)
             {
-                // A patch or restore finished while this scan was reading the disk, so its statuses may be stale.
                 statusRefreshWaitsForScan = false;
-                await RefreshStatusesAsync();
+                // A patch or restore finished while this scan was reading the disk, so its statuses may be stale. A
+                // scan that produced no list (failed or cancelled) has nothing to refresh.
+                if (scanProducedList)
+                {
+                    await RefreshStatusesAsync();
+                }
             }
         }
 
         private void RenderWarnings()
         {
+            warningsBox.Text = string.Join(Environment.NewLine, CurrentWarnings());
+        }
+
+        private List<string> CurrentWarnings()
+        {
             var warnings = new List<string>(lastScanWarnings);
             warnings.AddRange(statusWarnings);
             warnings.AddRange(operationWarnings.Items);
             // R35: a line reported both by the scan and by an operation is shown once.
-            warningsBox.Text = string.Join(Environment.NewLine, warnings.Distinct());
+            return warnings.Distinct().ToList();
+        }
+
+        /// <summary>
+        /// The status line: what the scan found, the number of warnings now on screen, and the offer to re-patch or
+        /// update. Recomputed from the current lists every time, never kept as text.
+        /// </summary>
+        private void ShowStatusLine()
+        {
+            var text = new StringBuilder(scanSummary);
+            if (summaryHasWarningCount)
+            {
+                text.Append(' ').Append(CurrentWarnings().Count).Append(" warnings.");
+            }
+            // R24: after a scan (and after any operation), offer Re-patch all / Update all when there is something to do.
+            string offer = DisplayText.PostUpdateSummary(lastStatuses);
+            if (offer.Length > 0)
+            {
+                text.Append(' ').Append(offer);
+            }
+            statusLabel.Text = text.ToString();
         }
 
         private void ShowResult(GameListResult result, IReadOnlyList<GamePatchStatus> statuses, IReadOnlyList<string> listWarnings, IReadOnlyList<string> newStatusWarnings)
@@ -306,10 +390,10 @@ namespace GameManager
             lastScanWarnings = warnings;
             statusWarnings = newStatusWarnings;
             RenderWarnings();
-            int warningCount = warnings.Count + newStatusWarnings.Count;
 
             if (result.SteamRoot == null)
             {
+                summaryHasWarningCount = false;
                 scanSummary = "Steam was not found on this PC. Install Steam and start it once, then click Refresh.";
                 ApplyStatuses(result.Entries, statuses);
                 return;
@@ -343,8 +427,9 @@ namespace GameManager
                 gameList.EndUpdate();
             }
 
+            summaryHasWarningCount = true;
             scanSummary = result.Entries.Count + " games found in " + result.SteamRoot + ". "
-                + blocked + " blocked (anti-cheat). " + warningCount + " warnings.";
+                + blocked + " blocked (anti-cheat).";
             ApplyStatuses(result.Entries, statuses);
         }
 
@@ -352,7 +437,7 @@ namespace GameManager
         /// Shows statuses in the Status column and the tooltips, refreshes the status line and hands the selected
         /// game to the patch row. Used after a scan and after an operation changed files.
         /// </summary>
-        private void ApplyStatuses(IReadOnlyList<GameEntry> entries, IReadOnlyList<GamePatchStatus> statuses)
+        private void ApplyStatuses(IReadOnlyList<GameEntry> entries, IReadOnlyList<GamePatchStatus> statuses, bool keepNotice = false)
         {
             lastEntries = entries;
             lastStatuses = statuses;
@@ -362,7 +447,12 @@ namespace GameManager
                 item.SubItems[StatusColumn].Text = DisplayText.StatusText(statuses[index].Status);
                 item.ToolTipText = Tooltip(entries[index], statuses[index]);
             }
-            statusLabel.Text = scanSummary;
+            patchBar.SetStatuses(statuses);
+            if (!keepNotice)
+            {
+                // A notice shown while the statuses were being read stays on the status line.
+                ShowStatusLine();
+            }
             OnSelectionChanged(this, EventArgs.Empty);
         }
 
@@ -414,23 +504,30 @@ namespace GameManager
             }
             IReadOnlyList<GameEntry> entries = lastEntries;
             var warnings = new List<string>();
+            int mine = ++statusSequence;
+            int noticesAtStart = noticeSequence;
             try
             {
                 IReadOnlyList<GamePatchStatus> statuses = await Task.Run(() => planner.GetStatuses(entries, warnings));
-                // A scan that started meanwhile owns the list now.
-                if (IsDisposed || scanCancellation != null || !ReferenceEquals(entries, lastEntries))
+                // A scan that started meanwhile owns the list now, and a newer status read supersedes this one.
+                if (IsDisposed || scanCancellation != null || mine != statusSequence || !ReferenceEquals(entries, lastEntries))
                 {
                     return;
                 }
-                ApplyStatuses(entries, statuses);
-                // Replaces the previous status warnings instead of adding to them.
+                // Replaces the previous status warnings instead of adding to them (before the line counts them).
                 statusWarnings = warnings;
                 RenderWarnings();
+                ApplyStatuses(entries, statuses, noticesAtStart != noticeSequence);
             }
             catch (Exception ex)
             {
-                // async void handlers must not let exceptions escape: that would close the app.
-                AddWarning("Could not read the patch status: " + ex.Message);
+                // async void handlers must not let exceptions escape: that would close the app. The message replaces
+                // the previous status warnings: it describes the disk right now.
+                if (!IsDisposed && mine == statusSequence)
+                {
+                    statusWarnings = new[] { "Could not read the patch status: " + ex.Message };
+                    RenderWarnings();
+                }
             }
         }
     }

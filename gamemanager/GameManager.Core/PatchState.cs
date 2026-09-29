@@ -166,11 +166,17 @@ namespace GameManager.Core
         }
 
         /// <summary>
-        /// The same key for "C:\Games\X\openvr_api.dll" and "c:/games/x/OPENVR_API.DLL" (the dictionary ignores case).
+        /// The same key for "C:\Games\X\openvr_api.dll", "c:/games/x/OPENVR_API.DLL" and "\\?\C:\Games\X\openvr_api.dll"
+        /// (the dictionary ignores case; the "\\?\" device prefix is dropped).
         /// </summary>
         public static string KeyOf(string dllPath)
         {
-            return Path.GetFullPath(dllPath.Replace('/', '\\'));
+            string full = Path.GetFullPath(dllPath.Replace('/', '\\'));
+            if (full.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                return @"\\" + full.Substring(8);
+            }
+            return full.StartsWith(@"\\?\", StringComparison.Ordinal) ? full.Substring(4) : full;
         }
 
         /// <summary>
@@ -248,6 +254,7 @@ namespace GameManager.Core
             }
 
             var state = new PatchState(true);
+            string skippedCopy = null;
             if (dto.Records != null)
             {
                 foreach (RecordDto item in dto.Records)
@@ -255,7 +262,20 @@ namespace GameManager.Core
                     PatchRecord record = ToRecord(item);
                     if (record == null)
                     {
-                        warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + (item == null ? "null" : item.DllPath ?? "no dllPath") + "). It will be dropped at the next save.");
+                        if (skippedCopy == null)
+                        {
+                            // The next save drops the skipped record: keep the file as it was first.
+                            try
+                            {
+                                skippedCopy = CopyAside(".skipped-");
+                            }
+                            catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
+                            {
+                                warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + (item == null ? "null" : item.DllPath ?? "no dllPath") + ") and could not keep a copy of the file (" + e.Message + "). Nothing will overwrite it.");
+                                return new PatchState(false);
+                            }
+                        }
+                        warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + (item == null ? "null" : item.DllPath ?? "no dllPath") + "). It will be dropped at the next save; the file as it was is kept as " + skippedCopy + ".");
                         continue;
                     }
                     if (state.Find(record.DllPath) != null)
@@ -299,6 +319,20 @@ namespace GameManager.Core
                 });
             }
             JsonFile.WriteAtomic(FilePath, dto);
+        }
+
+        /// <summary>
+        /// Copies state.json to state.json&lt;marker&gt;&lt;UTC time&gt; (plus a GUID suffix when that name exists) and returns the copy's path.
+        /// </summary>
+        private string CopyAside(string marker)
+        {
+            string copy = FilePath + marker + utcNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+            if (File.Exists(copy))
+            {
+                copy += "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            }
+            File.Copy(FilePath, copy, false);
+            return copy;
         }
 
         private PatchState SetAsideAndStartEmpty(string reason, IList<string> warnings)

@@ -74,6 +74,31 @@ namespace GameManager.Core
         }
 
         /// <summary>
+        /// True when path is inside folder at any depth, ignoring case. False for the folder itself, for a sibling
+        /// that only shares a prefix ("Game2" is not under "Game"), and for a path that is not fully qualified or
+        /// not valid. folder must be a valid absolute path (NormalizeDirectory rules).
+        /// </summary>
+        public static bool IsUnder(string path, string folder)
+        {
+            if (!IsFullyQualified(path))
+            {
+                return false;
+            }
+            string root = NormalizeDirectory(folder);
+            string prefix = root.EndsWith("\\", StringComparison.Ordinal) ? root : root + "\\";
+            string full;
+            try
+            {
+                full = Path.GetFullPath(path.Replace('/', '\\'));
+            }
+            catch (Exception e) when (IsInvalidPathError(e))
+            {
+                return false;
+            }
+            return full.Length > prefix.Length && full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// True for the exceptions Path.GetFullPath throws on a malformed or unusable path.
         /// </summary>
         public static bool IsInvalidPathError(Exception e)

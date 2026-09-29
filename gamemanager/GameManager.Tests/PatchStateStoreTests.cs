@@ -239,5 +239,96 @@ namespace GameManager.Tests
             StringAssert.Contains(warnings[0], "bad|name");
             Assert.IsTrue(state.CanSave);
         }
+
+        [TestMethod]
+        public void Load_CorruptFileAndAsideNameTaken_UsesGuidSuffixAndKeepsBothFiles()
+        {
+            string taken = path + ".corrupt-20260929-101500";
+            temp.WriteText(@"AppData\state.json.corrupt-20260929-101500", "older corrupt file");
+            temp.WriteText(@"AppData\state.json", "{ not json");
+            var warnings = new List<string>();
+
+            PatchState state = store.Load(warnings);
+
+            Assert.IsTrue(state.CanSave);
+            Assert.IsFalse(File.Exists(path));
+            Assert.AreEqual("older corrupt file", File.ReadAllText(taken));
+            string[] others = Directory.GetFiles(Path.GetDirectoryName(path), "state.json.corrupt-*")
+                .Where(f => !string.Equals(f, taken, StringComparison.OrdinalIgnoreCase)).ToArray();
+            Assert.AreEqual(1, others.Length);
+            StringAssert.StartsWith(others[0], taken + "-");
+            Assert.AreEqual("{ not json", File.ReadAllText(others[0]));
+            StringAssert.Contains(warnings[0], others[0]);
+        }
+
+        [TestMethod]
+        public void Load_CorruptFileThatCannotBeSetAside_RefusesToSave()
+        {
+            temp.WriteText(@"AppData\state.json", "{ not json");
+            var warnings = new List<string>();
+
+            // Readable by others, but it cannot be renamed while this handle is open.
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                PatchState state = store.Load(warnings);
+
+                Assert.IsFalse(state.CanSave);
+                Assert.AreEqual(1, warnings.Count);
+                StringAssert.Contains(warnings[0], "could not be set aside");
+                Assert.ThrowsException<InvalidOperationException>(() => store.Save(state));
+            }
+
+            Assert.AreEqual("{ not json", File.ReadAllText(path));
+        }
+
+        private string TwoBadRecordsAndOneGood()
+        {
+            return "{ \"version\": 1, \"records\": ["
+                + " { \"dllPath\": \"C:\\\\Games\\\\A\\\\openvr_api.dll\", \"arch\": \"x64\", \"originalSha256\": \"" + HashA + "\", \"openCompositeSha256\": \"" + HashB + "\" },"
+                + " { \"dllPath\": \"C:\\\\Games\\\\B\\\\openvr_api.dll\", \"arch\": \"x64\", \"originalSha256\": \"not a hash\", \"openCompositeSha256\": \"" + HashB + "\" },"
+                + " { \"dllPath\": \"C:\\\\Games\\\\C\\\\openvr_api.dll\", \"arch\": \"bogus\", \"originalSha256\": \"" + HashA + "\", \"openCompositeSha256\": \"" + HashB + "\" } ] }";
+        }
+
+        [TestMethod]
+        public void Load_SkippedRecord_KeepsACopyOfTheFileAsItWas()
+        {
+            string json = TwoBadRecordsAndOneGood();
+            temp.WriteText(@"AppData\state.json", json);
+            var warnings = new List<string>();
+
+            PatchState state = store.Load(warnings);
+
+            string copy = path + ".skipped-20260929-101500";
+            Assert.AreEqual(1, state.Records.Count);
+            Assert.AreEqual(json, File.ReadAllText(copy));
+            Assert.AreEqual(json, File.ReadAllText(path), "loading must not rewrite state.json");
+            Assert.AreEqual(2, warnings.Count);
+            Assert.IsTrue(warnings.All(w => w.Contains(copy)), string.Join("\n", warnings));
+            Assert.AreEqual(1, Directory.GetFiles(Path.GetDirectoryName(path), "state.json.skipped-*").Length, "one copy per load, not one per record");
+        }
+
+        [TestMethod]
+        public void Load_SkippedRecordAndCopyNameTaken_UsesGuidSuffix()
+        {
+            string taken = path + ".skipped-20260929-101500";
+            temp.WriteText(@"AppData\state.json.skipped-20260929-101500", "older copy");
+            temp.WriteText(@"AppData\state.json", TwoBadRecordsAndOneGood());
+
+            PatchState state = store.Load(new List<string>());
+
+            Assert.IsTrue(state.CanSave);
+            Assert.AreEqual("older copy", File.ReadAllText(taken));
+            Assert.AreEqual(2, Directory.GetFiles(Path.GetDirectoryName(path), "state.json.skipped-*").Length);
+        }
+
+        [TestMethod]
+        public void KeyOf_DeviceRootedPath_MatchesThePlainPath()
+        {
+            Assert.AreEqual(PatchState.KeyOf(@"C:\x\openvr_api.dll"), PatchState.KeyOf(@"\\?\C:\x\openvr_api.dll"));
+            Assert.AreEqual(PatchState.KeyOf(@"\\server\share\openvr_api.dll"), PatchState.KeyOf(@"\\?\UNC\server\share\openvr_api.dll"));
+            var state = new PatchState(true);
+            state.Put(Record(@"\\?\C:\Games\A\openvr_api.dll", 1));
+            Assert.IsNotNull(state.Find(@"c:\games\a\OPENVR_API.dll"));
+        }
     }
 }

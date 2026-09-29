@@ -71,5 +71,17 @@ namespace GameManager.Tests
         {
             Assert.AreEqual(@"\\server\share\SteamLibrary", PathUtil.NormalizeDirectory(@"\\server\share\SteamLibrary\"));
         }
+
+        [TestMethod]
+        [DataRow(@"C:\Games\A\bin\game.exe", @"C:\Games\A", true)]
+        [DataRow(@"c:\games\a\game.exe", @"C:\Games\A\", true)]
+        [DataRow(@"C:\Games\A2\game.exe", @"C:\Games\A", false)]
+        [DataRow(@"C:\Games\A", @"C:\Games\A", false)]
+        [DataRow("game.exe", @"C:\Games\A", false)]
+        [DataRow(@"E:\game.exe", @"E:\", true)]
+        public void IsUnder_MatchesOnlyPathsInsideTheFolder(string path, string folder, bool expected)
+        {
+            Assert.AreEqual(expected, PathUtil.IsUnder(path, folder));
+        }
     }
 }

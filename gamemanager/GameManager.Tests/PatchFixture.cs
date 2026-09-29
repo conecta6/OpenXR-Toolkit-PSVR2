@@ -48,6 +48,7 @@ namespace GameManager.Tests
             Http = new FakeHttpDownloader();
             Cache = new OpenCompositeCache(Paths, Settings, Http, () => Now);
             StateStore = new PatchStateStore(Paths.StateFile, () => Now);
+            Planner = new PatchPlanner(Cache, StateStore, () => Now);
             Processes = new FakeProcessImageSource();
             Guard = new RunningGameGuard(Processes, directory => null);
             Service = new PatchService(StateStore, Guard, () => Now);
@@ -61,6 +62,7 @@ namespace GameManager.Tests
         public FakeHttpDownloader Http { get; }
         public OpenCompositeCache Cache { get; }
         public PatchStateStore StateStore { get; }
+        public PatchPlanner Planner { get; }
         public FakeProcessImageSource Processes { get; }
         public RunningGameGuard Guard { get; }
         public PatchService Service { get; }

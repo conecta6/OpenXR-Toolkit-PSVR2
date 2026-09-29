@@ -137,6 +137,29 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void Execute_SourceChangesWhileBeingBackedUp_LeavesNoBackupAndNoTemporaryFile()
+        {
+            try
+            {
+                // The source changes after the copy was made and before the hashes are compared.
+                PatchExecutor.AfterBackupCopy = (source, temp) => File.WriteAllBytes(source, PatchFixture.OriginalDll(PeFixture.MachineX64, 9));
+
+                var change = new DllChange(dll, new[] { PatchAction.Backup(dll, bak) }, null, false);
+                ExecutionResult result = executor.Execute(Plan(change));
+
+                Assert.IsFalse(result.Succeeded);
+                StringAssert.Contains(result.Error, "does not match the original");
+                Assert.IsFalse(File.Exists(bak));
+                Assert.AreEqual(0, TemporaryFiles().Length);
+                Assert.AreEqual(0, result.CompletedActions.Count);
+            }
+            finally
+            {
+                PatchExecutor.AfterBackupCopy = null;
+            }
+        }
+
+        [TestMethod]
         public void Execute_DllDeletedSinceThePlan_StopsBeforeWritingAnything()
         {
             File.Delete(dll);

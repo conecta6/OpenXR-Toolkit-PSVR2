@@ -279,21 +279,25 @@ namespace GameManager.Core
 
         /// <summary>
         /// Null when the file looks like an OpenComposite DLL of that architecture, else the reason it does not.
+        /// Never throws for I/O or permission errors.
         /// </summary>
         public static string Validate(string path, OpenCompositeArch arch)
         {
-            var info = new FileInfo(path);
-            if (!info.Exists)
-            {
-                return "the file is missing.";
-            }
-            if (info.Length <= MinimumDllSize)
-            {
-                return "the file is too small (" + info.Length.ToString(CultureInfo.InvariantCulture) + " bytes) to be OpenComposite.";
-            }
             PeMachine machine;
             try
             {
+                // R32: the size is read inside the catch too. The file can vanish or become unreadable between
+                // Exists and Length, and FileInfo.Length then throws (FileNotFoundException is an IOException).
+                var info = new FileInfo(path);
+                if (!info.Exists)
+                {
+                    return "the file is missing.";
+                }
+                long length = info.Length;
+                if (length <= MinimumDllSize)
+                {
+                    return "the file is too small (" + length.ToString(CultureInfo.InvariantCulture) + " bytes) to be OpenComposite.";
+                }
                 machine = PeReader.ReadMachine(path);
             }
             catch (Exception e) when (IsDiskError(e))
@@ -309,6 +313,22 @@ namespace GameManager.Core
                 return "the file is a " + DisplayText.Machine(machine) + " DLL, expected " + ArchName(arch) + ".";
             }
             return null;
+        }
+
+        /// <summary>
+        /// The OpenComposite build for a game DLL of this machine type, or null when upstream has none (ARM64, unknown).
+        /// </summary>
+        public static OpenCompositeArch? ArchFor(PeMachine machine)
+        {
+            switch (machine)
+            {
+                case PeMachine.X64:
+                    return OpenCompositeArch.X64;
+                case PeMachine.X86:
+                    return OpenCompositeArch.X86;
+                default:
+                    return null;
+            }
         }
 
         /// <summary>

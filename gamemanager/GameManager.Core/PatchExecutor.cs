@@ -96,6 +96,12 @@ namespace GameManager.Core
     /// </summary>
     internal sealed class PatchExecutor
     {
+        /// <summary>
+        /// Test seam (source, temporary copy): called after BackupVerified copied the source and before it hashes
+        /// both, so a test can change the source in between. Null in production.
+        /// </summary>
+        internal static Action<string, string> AfterBackupCopy;
+
         private readonly RunningGameGuard guard;
 
         public PatchExecutor(RunningGameGuard guard)
@@ -265,6 +271,7 @@ namespace GameManager.Core
             try
             {
                 File.Copy(source, temp, false);
+                AfterBackupCopy?.Invoke(source, temp);
                 string expected = FileHash.Sha256(source);
                 string actual = FileHash.Sha256(temp);
                 if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))

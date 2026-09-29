@@ -136,9 +136,7 @@ namespace {
                        m_configManager->hasChanged(SettingPostColorSpace);
             } else {
                 return m_configManager->hasChanged(SettingPostColorGainR) ||
-                       m_configManager->hasChanged(SettingPostColorGainB) ||
-                       m_configManager->hasChanged(SettingPostFakeHDR) ||
-                       m_configManager->hasChanged(SettingPostColorSpace);
+                       m_configManager->hasChanged(SettingPostColorGainB);
             }
         }
 

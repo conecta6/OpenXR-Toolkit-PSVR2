@@ -1587,6 +1587,21 @@ namespace {
                                      1000,
                                      MenuEntry::FmtDecimal<1>});
             m_menuEntries.back().acceleration = 5;
+            m_menuEntries.push_back({MenuIndent::SubGroupIndent,
+                                     "Color space",
+                                     MenuEntryType::Choice,
+                                     SettingPostColorSpace,
+                                     0,
+                                     MenuEntry::LastVal<PostColorSpaceType>(),
+                                     MenuEntry::FmtEnum<PostColorSpaceType>});
+            m_menuEntries.push_back({MenuIndent::SubGroupIndent,
+                                     "Fake HDR",
+                                     MenuEntryType::Slider,
+                                     SettingPostFakeHDR,
+                                     0,
+                                     1000,
+                                     MenuEntry::FmtDecimal<1>});
+            m_menuEntries.back().acceleration = 5;
             postProcessGroup.finalize();
             MenuGroup caCorrectionGroup(this, [&] {
                 return m_configManager->peekEnumValue<PostProcessType>(SettingPostProcess) ==
@@ -1609,21 +1624,6 @@ namespace {
                                      MenuEntry::FmtDecimal<3, -100000>});
             m_menuEntries.back().acceleration = 5;
             caCorrectionGroup.finalize();
-            m_menuEntries.push_back({MenuIndent::OptionIndent,
-                                     "Color space",
-                                     MenuEntryType::Choice,
-                                     SettingPostColorSpace,
-                                     0,
-                                     MenuEntry::LastVal<PostColorSpaceType>(),
-                                     MenuEntry::FmtEnum<PostColorSpaceType>});
-            m_menuEntries.push_back({MenuIndent::OptionIndent,
-                                     "Fake HDR",
-                                     MenuEntryType::Slider,
-                                     SettingPostFakeHDR,
-                                     0,
-                                     1000,
-                                     MenuEntry::FmtDecimal<1>});
-            m_menuEntries.back().acceleration = 5;
 
             m_menuEntries.push_back(
                 {MenuIndent::OptionIndent, "World scale", MenuEntryType::Slider, SettingICD, 1, 10000, [&](int value) {

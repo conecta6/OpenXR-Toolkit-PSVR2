@@ -277,14 +277,6 @@ float4 mainPassThrough(in float4 position : SV_POSITION, in float2 texcoord : TE
   color = srgb2linear(color);
 #endif
 
-  // fake hdr look (needs the neighboring pixels of the input image).
-  if (Params2.w) {
-    color = AdjustFakeHDR(color, texcoord, Params2.w);
-  }
-  // reinterpret the color space.
-  if (Params5.w) {
-    color = AdjustColorSpace(color);
-  }
   // adjust color input gains.
   if (any(Params2.rgb)) {
     color = AdjustGains(color, Params2.rgb);

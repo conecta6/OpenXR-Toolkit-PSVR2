@@ -19,6 +19,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
 using System;
 using System.Threading;
 
@@ -65,7 +66,8 @@ namespace GameManager.Core
         }
 
         /// <summary>
-        /// A lease to dispose when the operation ends, or null when another operation is running.
+        /// A lease to dispose when the operation ends, or null when another operation is running. Enter and release
+        /// the lease on the UI thread; the Changed handlers still cope with any thread.
         /// </summary>
         public IDisposable TryEnter(string operation)
         {

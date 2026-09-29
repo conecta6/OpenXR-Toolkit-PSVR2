@@ -53,6 +53,7 @@ namespace GameManager.Tests
                 Assert.AreEqual(root, paths.Root, true);
                 Assert.AreEqual(Path.Combine(root, "settings.json"), paths.SettingsFile, true);
                 Assert.AreEqual(Path.Combine(root, "opencomposite"), paths.OpenCompositeFolder, true);
+                Assert.AreEqual(Path.Combine(root, "state.json"), paths.StateFile, true);
                 Assert.IsFalse(Directory.Exists(root), "building the paths must not create anything");
             }
         }

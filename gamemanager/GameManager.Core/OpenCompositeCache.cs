@@ -639,7 +639,7 @@ namespace GameManager.Core
             return new DownloadOutcome(arch, DownloadStatus.Failed, message);
         }
 
-        private static bool IsDiskError(Exception e)
+        internal static bool IsDiskError(Exception e)
         {
             return e is IOException || e is UnauthorizedAccessException || e is SecurityException;
         }

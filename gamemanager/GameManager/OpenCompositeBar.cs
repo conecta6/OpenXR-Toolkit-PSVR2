@@ -19,6 +19,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -38,7 +39,7 @@ namespace GameManager
     /// </summary>
     public sealed class OpenCompositeBar : FlowLayoutPanel
     {
-        private const string OperationName = "OpenComposite download or check";
+        private const string OperationName = "OpenComposite download, check or accept";
 
         private readonly OpenCompositeCache cache;
         private readonly OperationGate gate;
@@ -278,10 +279,27 @@ namespace GameManager
 
         private void OnGateChanged(object sender, EventArgs e)
         {
-            if (!IsDisposed)
+            if (IsDisposed)
             {
-                RefreshButtons();
+                return;
             }
+            if (InvokeRequired)
+            {
+                // The gate can change on any thread that releases a lease.
+                if (IsHandleCreated)
+                {
+                    try
+                    {
+                        BeginInvoke(new Action(() => OnGateChanged(sender, e)));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // The window closed between the check and the call.
+                    }
+                }
+                return;
+            }
+            RefreshButtons();
         }
 
         protected override void Dispose(bool disposing)

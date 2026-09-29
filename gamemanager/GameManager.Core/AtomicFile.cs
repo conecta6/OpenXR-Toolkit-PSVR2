@@ -55,6 +55,15 @@ namespace GameManager.Core
         }
 
         /// <summary>
+        /// Renames a file that must not be lost (for example an unusable state.json set aside). Throws if
+        /// destination exists; I/O and permission errors pass through.
+        /// </summary>
+        public static void Rename(string source, string destination)
+        {
+            File.Move(source, destination);
+        }
+
+        /// <summary>
         /// Deletes a file if it exists. Never throws for I/O or permission errors: used to clean up temporary files.
         /// </summary>
         public static void TryDelete(string path)

@@ -53,6 +53,14 @@ namespace GameManager.Core
         }
 
         /// <summary>
+        /// R20: one record per patched openvr_api.dll.
+        /// </summary>
+        public string StateFile
+        {
+            get { return Path.Combine(Root, "state.json"); }
+        }
+
+        /// <summary>
         /// Holds x64\openvr_api.dll, x86\openvr_api.dll and cache.json.
         /// </summary>
         public string OpenCompositeFolder

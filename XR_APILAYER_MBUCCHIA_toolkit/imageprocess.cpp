@@ -38,7 +38,7 @@ namespace {
 
     struct alignas(16) ImageProcessorConfig {
         XrVector4f Params1; // Contrast, Brightness, Exposure, Saturation (-1..+1 params)
-        XrVector4f Params2; // ColorGainR, ColorGainG, ColorGainB (-1..+1 params)
+        XrVector4f Params2; // ColorGainR, ColorGainG, ColorGainB (-1..+1 params), FakeHDR (0..1 param)
         XrVector4f Params3; // Highlights, Shadows, Vibrance (0..1 params), UseCA (0 = off, 1 = on)
         XrVector4f Params4; // ChromaticCorrectionR, ChromaticCorrectionG, ChromaticCorrectionB (-1..+1 params)
                             // Eye (0 = left, 1 = right)
@@ -127,6 +127,7 @@ namespace {
                        m_configManager->hasChanged(SettingPostVibrance) ||
                        m_configManager->hasChanged(SettingPostHighlights) ||
                        m_configManager->hasChanged(SettingPostShadows) ||
+                       m_configManager->hasChanged(SettingPostFakeHDR) ||
                        m_configManager->hasChanged(SettingPostColorGainR) ||
                        m_configManager->hasChanged(SettingPostColorGainG) ||
                        m_configManager->hasChanged(SettingPostColorGainB) ||
@@ -136,6 +137,7 @@ namespace {
             } else {
                 return m_configManager->hasChanged(SettingPostColorGainR) ||
                        m_configManager->hasChanged(SettingPostColorGainB) ||
+                       m_configManager->hasChanged(SettingPostFakeHDR) ||
                        m_configManager->hasChanged(SettingPostColorSpace);
             }
         }
@@ -153,7 +155,7 @@ namespace {
 
             static constexpr XMVECTORF32 kGainBias[3][2] = {
                 {{{{+2.0f, 1.6f, 6.0f, 2.0f}}}, {{{+1.0f, 0.8f, 3.0f, 1.0f}}}}, // ((v * 2) - 1)  -> [-1..+1]
-                {{{{+2.0f, 2.0f, 2.0f, 2.0f}}}, {{{+1.0f, 1.0f, 1.0f, 1.0f}}}}, // ((v * 2) - 1)  -> [-1..+1]
+                {{{{+2.0f, 2.0f, 2.0f, 1.0f}}}, {{{+1.0f, 1.0f, 1.0f, 0.0f}}}}, // ((v * 2) - 1)  -> [-1..+1] (w: [0..+1])
                 {{{{-1.0f, 0.5f, 1.0f, 1.0f}}}, {{{-1.0f, 0.0f, 0.0f, 0.0f}}}}, // ((v * 1) - 0)  -> [ 0..+1]
             };
 
@@ -234,7 +236,7 @@ namespace {
                         XMINT4(configManager->getValue(SettingPostColorGainR + suffix),
                                configManager->getValue(SettingPostColorGainG + suffix),
                                configManager->getValue(SettingPostColorGainB + suffix),
-                               0),
+                               configManager->getValue(SettingPostFakeHDR + suffix)),
 
                         XMINT4(configManager->getValue(SettingPostHighlights + suffix),
                                configManager->getValue(SettingPostShadows + suffix),

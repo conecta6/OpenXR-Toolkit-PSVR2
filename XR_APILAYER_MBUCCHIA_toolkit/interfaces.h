@@ -182,6 +182,7 @@ namespace toolkit {
         const std::string SettingPostColorGainB = "post_gain_b";
         const std::string SettingPostHighlights = "post_highlights";
         const std::string SettingPostShadows = "post_shadows";
+        const std::string SettingPostFakeHDR = "post_fake_hdr";
         const std::string SettingPostChromaticCorrectionR = "post_ca_r";
         const std::string SettingPostChromaticCorrectionB = "post_ca_b";
         const std::string SettingEyeTrackingEnabled = "eye_tracking";

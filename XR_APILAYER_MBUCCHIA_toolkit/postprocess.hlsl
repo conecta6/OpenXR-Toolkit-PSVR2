@@ -25,7 +25,7 @@
 
 cbuffer config : register(b0) {
     float4 Params1;  // Contrast, Brightness, Exposure, Saturation (-1..+1 params)
-    float4 Params2;  // ColorGainR, ColorGainG, ColorGainB (-1..+1 params)
+    float4 Params2;  // ColorGainR, ColorGainG, ColorGainB (-1..+1 params), FakeHDR (0..1 param)
     float4 Params3;  // Highlights, Shadows, Vibrance (0..1 params), UseCA (0 = off, 1 = on)
     float4 Params4;  // ChromaticCorrectionR, ChromaticCorrectionG, ChromaticCorrectionB (-1..+1 params), Eye (0 = left, 1 = right)
     float4 Params5;  // ColorSpace matrix row 0 (linear RGB -> linear RGB), UseColorSpace (0 = off, 1 = on)
@@ -165,6 +165,50 @@ float3 AdjustHighlightsShadows(float3 color, float2 amount) {
   return (color/luma) * (h + s - luma);
 }
 
+// Fake HDR: not actual HDR, it mimics an HDR look with two rings of 8 taps (relatively high performance cost).
+// Ported from SweetFX FakeHDR by Christian Cann Schuldt Jensen ~ CeeJay.dk (https://github.com/CeeJayDK/SweetFX).
+//
+// The MIT License (MIT)
+// Copyright (c) 2014 CeeJayDK
+// (full license text in THIRD_PARTY)
+static const float FakeHDRPower = 1.30;
+static const float FakeHDRRadius1 = 0.793;
+static const float FakeHDRRadius2 = 0.87;
+
+#ifdef POST_PROCESS_SRC_SRGB
+#define SAMPLE_COLOR(texcoord) srgb2linear(SAMPLE_TEXTURE(texcoord).rgb)
+#else
+#define SAMPLE_COLOR(texcoord) SAMPLE_TEXTURE(texcoord).rgb
+#endif
+
+float3 FakeHDRRing(float2 texcoord, float2 scale) {
+  float3 sum = SAMPLE_COLOR(texcoord + float2( 1.5, -1.5) * scale);
+  sum += SAMPLE_COLOR(texcoord + float2(-1.5, -1.5) * scale);
+  sum += SAMPLE_COLOR(texcoord + float2( 1.5,  1.5) * scale);
+  sum += SAMPLE_COLOR(texcoord + float2(-1.5,  1.5) * scale);
+  sum += SAMPLE_COLOR(texcoord + float2( 0.0, -2.5) * scale);
+  sum += SAMPLE_COLOR(texcoord + float2( 0.0,  2.5) * scale);
+  sum += SAMPLE_COLOR(texcoord + float2(-2.5,  0.0) * scale);
+  sum += SAMPLE_COLOR(texcoord + float2( 2.5,  0.0) * scale);
+  return sum;
+}
+
+// 0..1
+float3 AdjustFakeHDR(float3 color, float2 texcoord, float amount) {
+  float2 size;
+  sourceTexture.GetDimensions(size.x, size.y);
+  float2 pixelSize = rcp(size);
+
+  float3 bloom_sum1 = FakeHDRRing(texcoord, FakeHDRRadius1 * pixelSize) * 0.005;
+  float3 bloom_sum2 = FakeHDRRing(texcoord, FakeHDRRadius2 * pixelSize) * 0.010;
+
+  float dist = FakeHDRRadius2 - FakeHDRRadius1;
+  float3 HDR = (color + (bloom_sum2 - bloom_sum1)) * dist;
+  float3 blend = HDR + color;
+  float3 result = saturate(pow(abs(blend), abs(FakeHDRPower)) + HDR);
+  return lerp(color, result, amount);
+}
+
 float4 mainPostProcess(in float4 position : SV_POSITION, in float2 texcoord : TEXCOORD0) : SV_TARGET {
   float3 color = SAMPLE_TEXTURE(texcoord).rgb;
 
@@ -172,6 +216,10 @@ float4 mainPostProcess(in float4 position : SV_POSITION, in float2 texcoord : TE
   color = srgb2linear(color);
  #endif
   
+  // fake hdr look (needs the neighboring pixels of the input image).
+  if (Params2.w) {
+    color = AdjustFakeHDR(color, texcoord, Params2.w);
+  }
   // reinterpret the color space.
   if (Params5.w) {
     color = AdjustColorSpace(color);
@@ -229,6 +277,10 @@ float4 mainPassThrough(in float4 position : SV_POSITION, in float2 texcoord : TE
   color = srgb2linear(color);
 #endif
 
+  // fake hdr look (needs the neighboring pixels of the input image).
+  if (Params2.w) {
+    color = AdjustFakeHDR(color, texcoord, Params2.w);
+  }
   // reinterpret the color space.
   if (Params5.w) {
     color = AdjustColorSpace(color);

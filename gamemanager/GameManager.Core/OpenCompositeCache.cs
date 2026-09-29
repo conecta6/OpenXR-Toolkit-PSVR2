@@ -406,13 +406,23 @@ namespace GameManager.Core
         /// Downloads the latest build of every cached architecture (never one that was not cached) to a temporary
         /// file and compares its SHA-256 with the cached file's. A different build waits as openvr_api.dll.new until
         /// AcceptPendingUpdate. The check time is recorded only when every architecture was checked without error,
-        /// so a failed check is retried at the next startup.
+        /// so a failed check is retried at the next startup. When the license notice has not been accepted, nothing is
+        /// downloaded and each cached architecture gets a LicenseNotAccepted outcome (R35).
         /// </summary>
         public async Task<IReadOnlyList<DownloadOutcome>> CheckForUpdatesAsync(IList<string> warnings, CancellationToken cancellation)
         {
             var outcomes = new List<DownloadOutcome>();
             if (!IsLicenseAccepted(warnings))
             {
+                // R35: never a silent no-op. Nothing is downloaded; each cached architecture says why it was not
+                // checked (settings.json may have been lost or reset). With nothing cached there is nothing to say.
+                foreach (CachedBuild build in GetBuilds(warnings))
+                {
+                    outcomes.Add(new DownloadOutcome(
+                        build.Arch,
+                        DownloadStatus.LicenseNotAccepted,
+                        "OpenComposite " + ArchName(build.Arch) + " was not checked for a new build: its license notice has not been accepted. Click \"Check for OpenComposite update\" to see it."));
+                }
                 return outcomes;
             }
             IReadOnlyList<CachedBuild> builds = GetBuilds(warnings);

@@ -19,7 +19,6 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -34,23 +33,31 @@ namespace GameManager
 {
     /// <summary>
     /// Second row of the window: the OpenComposite cache (phase 4). All work goes through OpenCompositeCache;
-    /// this class only wires buttons, the license dialog and messages.
+    /// this class only wires buttons, the license dialog and messages. It shares one OperationGate with the patch
+    /// controls (R33), so the cached DLL never changes while a patch is planning or copying it.
     /// </summary>
     public sealed class OpenCompositeBar : FlowLayoutPanel
     {
+        private const string OperationName = "OpenComposite download or check";
+
         private readonly OpenCompositeCache cache;
+        private readonly OperationGate gate;
         private readonly Action<string> addWarning;
+        private readonly Action<string> showNotice;
         private readonly Button downloadButton;
         private readonly Button checkButton;
         private readonly Button acceptButton;
         private readonly Label summaryLabel;
         private readonly CancellationTokenSource closing = new CancellationTokenSource();
-        private bool busy;
+        private int cachedBuildCount;
+        private bool hasPendingUpdate;
 
-        public OpenCompositeBar(OpenCompositeCache cache, Action<string> addWarning)
+        public OpenCompositeBar(OpenCompositeCache cache, OperationGate gate, Action<string> addWarning, Action<string> showNotice)
         {
             this.cache = cache ?? throw new ArgumentNullException(nameof(cache));
+            this.gate = gate ?? throw new ArgumentNullException(nameof(gate));
             this.addWarning = addWarning ?? throw new ArgumentNullException(nameof(addWarning));
+            this.showNotice = showNotice ?? throw new ArgumentNullException(nameof(showNotice));
 
             Dock = DockStyle.Fill;
             AutoSize = true;
@@ -68,6 +75,7 @@ namespace GameManager
             Controls.Add(checkButton);
             Controls.Add(acceptButton);
             Controls.Add(summaryLabel);
+            gate.Changed += OnGateChanged;
             RefreshState(new List<string>());
         }
 
@@ -81,7 +89,8 @@ namespace GameManager
 
         /// <summary>
         /// R14 at startup: checks upstream at most once per 24 hours, and only when a build is already cached
-        /// (so the first start never touches the network). Silent except for warnings and the accept button.
+        /// (so the first start never touches the network). Silent except for warnings and the accept button;
+        /// skipped when another operation already holds the gate (it runs again at the next start).
         /// </summary>
         public Task StartupCheckAsync()
         {
@@ -90,7 +99,7 @@ namespace GameManager
 
         private async void OnDownloadClick(object sender, EventArgs e)
         {
-            if (busy || !EnsureLicenseAccepted())
+            if (!EnsureNotBusy() || !EnsureLicenseAccepted())
             {
                 return;
             }
@@ -107,6 +116,12 @@ namespace GameManager
 
         private async void OnCheckClick(object sender, EventArgs e)
         {
+            // R35: with the license not accepted (never, or settings.json was lost) the check would do nothing;
+            // the notice is shown instead of failing silently.
+            if (!EnsureNotBusy() || !EnsureLicenseAccepted())
+            {
+                return;
+            }
             await RunAsync((warnings, token) => Task.Run(() => cache.CheckForUpdatesAsync(warnings, token)), true);
         }
 
@@ -124,6 +139,24 @@ namespace GameManager
                 }
                 return (IReadOnlyList<DownloadOutcome>)outcomes;
             }), true);
+        }
+
+        /// <summary>
+        /// R33/R35: false, with a status-line notice (not a warning), when another operation is running.
+        /// </summary>
+        private bool EnsureNotBusy()
+        {
+            if (!gate.IsBusy)
+            {
+                return true;
+            }
+            ShowBusyNotice();
+            return false;
+        }
+
+        private void ShowBusyNotice()
+        {
+            showNotice("Another operation is running (" + gate.CurrentOperation + "). Try again when it finishes.");
         }
 
         /// <summary>
@@ -165,21 +198,17 @@ namespace GameManager
             {
                 return;
             }
-            if (busy)
+            // R33: the gate is taken here, after the license dialog (a nested message loop) may have let another
+            // operation start; then a user-triggered call gets a notice and the silent startup check skips.
+            IDisposable lease = gate.TryEnter(OperationName);
+            if (lease == null)
             {
-                // Can happen when the license dialog was shown (a nested message loop) and another operation,
-                // such as the startup check, started while it was up. Only user-triggered callers (showResult)
-                // need telling; a silent StartupCheckAsync colliding with itself cannot happen.
                 if (showResult)
                 {
-                    addWarning("Another OpenComposite operation is running; try again when it finishes.");
+                    ShowBusyNotice();
                 }
                 return;
             }
-            busy = true;
-            downloadButton.Enabled = false;
-            checkButton.Enabled = false;
-            acceptButton.Enabled = false;
             var warnings = new List<string>();
             IReadOnlyList<DownloadOutcome> outcomes = new DownloadOutcome[0];
             try
@@ -198,7 +227,7 @@ namespace GameManager
             }
             finally
             {
-                busy = false;
+                lease.Dispose();
             }
             if (IsDisposed)
             {
@@ -217,15 +246,15 @@ namespace GameManager
             {
                 addWarning(warning);
             }
-            if (showResult && outcomes.Count > 0)
+            if (showResult)
             {
-                bool failed = outcomes.Any(o => o.Status == DownloadStatus.Failed);
-                MessageBox.Show(
-                    FindForm(),
-                    string.Join(Environment.NewLine, outcomes.Select(o => o.Message)),
-                    "OpenComposite",
-                    MessageBoxButtons.OK,
-                    failed ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                // R35: a user-triggered operation always answers, even when there was nothing to do.
+                bool failed = outcomes.Count == 0
+                    || outcomes.Any(o => o.Status == DownloadStatus.Failed || o.Status == DownloadStatus.LicenseNotAccepted);
+                string text = outcomes.Count > 0
+                    ? string.Join(Environment.NewLine, outcomes.Select(o => o.Message))
+                    : "Nothing was done: OpenComposite has not been downloaded yet, or no new build is waiting.";
+                MessageBox.Show(FindForm(), text, "OpenComposite", MessageBoxButtons.OK, failed ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             }
         }
 
@@ -233,16 +262,33 @@ namespace GameManager
         {
             IReadOnlyList<CachedBuild> builds = cache.GetBuilds(warnings);
             summaryLabel.Text = DisplayText.OpenCompositeSummary(builds);
-            downloadButton.Enabled = !busy;
-            checkButton.Enabled = !busy && builds.Count > 0;
-            acceptButton.Visible = builds.Any(b => b.HasPendingUpdate);
-            acceptButton.Enabled = !busy;
+            cachedBuildCount = builds.Count;
+            hasPendingUpdate = builds.Any(b => b.HasPendingUpdate);
+            RefreshButtons();
+        }
+
+        private void RefreshButtons()
+        {
+            bool free = !gate.IsBusy;
+            downloadButton.Enabled = free;
+            checkButton.Enabled = free && cachedBuildCount > 0;
+            acceptButton.Visible = hasPendingUpdate;
+            acceptButton.Enabled = free;
+        }
+
+        private void OnGateChanged(object sender, EventArgs e)
+        {
+            if (!IsDisposed)
+            {
+                RefreshButtons();
+            }
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                gate.Changed -= OnGateChanged;
                 closing.Dispose();
             }
             base.Dispose(disposing);

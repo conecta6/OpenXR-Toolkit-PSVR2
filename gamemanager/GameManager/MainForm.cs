@@ -24,6 +24,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -45,9 +46,12 @@ namespace GameManager
         private readonly TextBox warningsBox;
         private readonly OpenCompositeBar openCompositeBar;
 
-        // F4: OpenComposite warnings live in their own list and are re-appended after every scan, so Refresh
-        // (which rebuilds warningsBox.Text from the scan's own warnings) never erases them.
-        private readonly List<string> openCompositeWarnings = new List<string>();
+        // F4/R35: warnings from operations (OpenComposite now, patching later) live in their own de-duplicated log
+        // and are re-appended after every scan, so Refresh never erases them and repeats never pile up.
+        private readonly WarningLog operationWarnings = new WarningLog();
+
+        // R33: one operation at a time across every toolbar row.
+        private readonly OperationGate gate = new OperationGate();
         private IReadOnlyList<string> lastScanWarnings = new string[0];
         private CancellationTokenSource scanCancellation;
 
@@ -101,7 +105,7 @@ namespace GameManager
                 WordWrap = false,
             };
 
-            openCompositeBar = new OpenCompositeBar(openComposite, AddWarning);
+            openCompositeBar = new OpenCompositeBar(openComposite, gate, AddWarning, ShowNotice);
 
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -127,7 +131,7 @@ namespace GameManager
             {
                 return;
             }
-            // After the scan: lastScanWarnings and openCompositeWarnings are separate lists (F4), but running
+            // After the scan: lastScanWarnings and operationWarnings are separate lists (F4), but running
             // this after the scan keeps warnings from a startup check tidily below the scan's own warnings. At
             // most once per 24 hours, and only when OpenComposite was downloaded before.
             await openCompositeBar.StartupCheckAsync();
@@ -151,8 +155,21 @@ namespace GameManager
             {
                 return;
             }
-            openCompositeWarnings.Add(line);
-            RenderWarnings();
+            if (operationWarnings.Add(line))
+            {
+                RenderWarnings();
+            }
+        }
+
+        /// <summary>
+        /// R35: transient notices ("another operation is running") go to the status line, never to the warnings.
+        /// </summary>
+        private void ShowNotice(string text)
+        {
+            if (!IsDisposed)
+            {
+                statusLabel.Text = text;
+            }
         }
 
         private async Task ScanAsync()
@@ -165,7 +182,7 @@ namespace GameManager
                 refreshButton.Enabled = false;
                 statusLabel.Text = "Scanning…";
                 gameList.Items.Clear();
-                // F4: only the scan's own warnings are cleared here; openCompositeWarnings survives and is
+                // F4: only the scan's own warnings are cleared here; operationWarnings survives and is
                 // re-appended by RenderWarnings, both here and in ShowResult below.
                 lastScanWarnings = new string[0];
                 RenderWarnings();
@@ -198,7 +215,7 @@ namespace GameManager
                 {
                     statusLabel.Text = "Scan failed. Details below.";
                     // F4: goes through lastScanWarnings/RenderWarnings, not a direct warningsBox.Text
-                    // assignment, so it does not erase openCompositeWarnings and is not itself erased by a
+                    // assignment, so it does not erase operationWarnings and is not itself erased by a
                     // later AddWarning (e.g. the startup check that runs right after OnShown's failed scan).
                     lastScanWarnings = new[] { ex.ToString() };
                     RenderWarnings();
@@ -221,8 +238,9 @@ namespace GameManager
         private void RenderWarnings()
         {
             var warnings = new List<string>(lastScanWarnings);
-            warnings.AddRange(openCompositeWarnings);
-            warningsBox.Text = string.Join(Environment.NewLine, warnings);
+            warnings.AddRange(operationWarnings.Items);
+            // R35: a line reported both by the scan and by an operation is shown once.
+            warningsBox.Text = string.Join(Environment.NewLine, warnings.Distinct());
         }
 
         private void ShowResult(GameListResult result, IReadOnlyList<string> listWarnings)

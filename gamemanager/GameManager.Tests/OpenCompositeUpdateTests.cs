@@ -177,11 +177,25 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
-        public async Task CheckForUpdates_LicenseNoLongerAccepted_DoesNothing()
+        public async Task CheckForUpdates_LicenseNoLongerAccepted_SaysSoWithoutNetwork()
         {
             await CacheBuildOneAsync();
             settings.Save(new AppSettings());
 
+            IReadOnlyList<DownloadOutcome> outcomes = await cache.CheckForUpdatesAsync(new List<string>(), CancellationToken.None);
+
+            // R35: never a silent no-op.
+            Assert.AreEqual(1, outcomes.Count);
+            Assert.AreEqual(OpenCompositeArch.X64, outcomes[0].Arch);
+            Assert.AreEqual(DownloadStatus.LicenseNotAccepted, outcomes[0].Status);
+            StringAssert.Contains(outcomes[0].Message, "license notice");
+            Assert.AreEqual(0, http.RequestedUrls.Count);
+            Assert.IsNull(settings.Load(new List<string>()).LastUpdateCheckUtc);
+        }
+
+        [TestMethod]
+        public async Task CheckForUpdates_LicenseNotAcceptedAndNothingCached_ReportsNothing()
+        {
             IReadOnlyList<DownloadOutcome> outcomes = await cache.CheckForUpdatesAsync(new List<string>(), CancellationToken.None);
 
             Assert.AreEqual(0, outcomes.Count);

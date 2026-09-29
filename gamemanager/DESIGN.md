@@ -136,8 +136,10 @@ thread.
   A DLL that is already OpenComposite without a record is patched only if a `.bak` with a real original sits next
   to it; otherwise the game is blocked, because an OpenComposite DLL must never become "the original".
   Batches ("Re-patch all", "Update all") never ask: such games are skipped and reported.
-- Restore (R18, R36): puts the original back from the `.bak`, verifies it, then deletes the `.bak` and an
-  `opencomposite.ini` Game Manager created (an ini it did not create is never touched). Any known OpenComposite
+- Restore (R18, R36): puts the original back from the `.bak` and verifies it (when Steam already put the original
+  back, only the `.bak` is removed; with no `.bak`, only the record is), and only after that deletes the `.bak`
+  and an `opencomposite.ini` Game Manager created (an ini it did not create is never touched). A `.bak` that no
+  longer matches the recorded original stops the restore. Any known OpenComposite
   build is replaced without a question, since that loses nothing. Restore stays enabled for a patched game that is
   blocked or no longer OpenVR (R36): getting back to the original is always the safer direction.
 - Anti-cheat confirmation (R29): when a game's folders could not all be checked for anti-cheat files

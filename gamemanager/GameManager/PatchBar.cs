@@ -222,9 +222,41 @@ namespace GameManager
         /// <summary>
         /// Plans every game inside the gate, runs them with PatchService.ApplyAll (simulation honoured; games that
         /// need a question are skipped), shows the summary, and offers an elevated relaunch on a permission error.
-        /// The lease is taken and released here, on the UI thread, and the window will not close meanwhile (P1).
         /// </summary>
-        private async Task RunBatchAsync(string operation, Func<List<string>, IReadOnlyList<PatchPlan>> makePlans)
+        private Task RunBatchAsync(string operation, Func<List<string>, IReadOnlyList<PatchPlan>> makePlans)
+        {
+            return RunLeasedAsync(operation, async warnings =>
+            {
+                bool simulation = simulationBox.Checked;
+                // Planned inside the gate, so the cached DLL cannot change between planning and copying (R33).
+                BatchResult result = await Task.Run(() => service.ApplyAll(makePlans(warnings), simulation));
+                warnings.AddRange(result.Warnings);
+                if (IsDisposed)
+                {
+                    return false;
+                }
+                PlanTextDialog.ShowText(FindForm(), simulation ? "Simulation - nothing was changed" : operation, result.Message);
+                if (result.ChangedSomething)
+                {
+                    StatusesChanged?.Invoke(this, EventArgs.Empty);
+                }
+                return result.NeedsElevation && ElevatedRelaunch.Offer(FindForm(), result.Message);
+            });
+        }
+
+        private string BusyNotice()
+        {
+            return "Another operation is running (" + gate.CurrentOperation + "). Try again when it finishes.";
+        }
+
+        /// <summary>
+        /// The skeleton every operation shares: take the gate (or say it is busy), mark the operation as running so the
+        /// window will not close (P1), run the body, turn an unexpected exception into a warning and a status
+        /// refresh, release the lease and show the warnings, then announce an elevated relaunch if the body asked
+        /// for one. The lease is taken and released here, on the UI thread. The body returns true to ask for the
+        /// relaunch.
+        /// </summary>
+        private async Task RunLeasedAsync(string operation, Func<List<string>, Task<bool>> body)
         {
             if (IsDisposed)
             {
@@ -241,23 +273,7 @@ namespace GameManager
             var warnings = new List<string>();
             try
             {
-                bool simulation = simulationBox.Checked;
-                // Planned inside the gate, so the cached DLL cannot change between planning and copying (R33).
-                BatchResult result = await Task.Run(() => service.ApplyAll(makePlans(warnings), simulation));
-                warnings.AddRange(result.Warnings);
-                if (IsDisposed)
-                {
-                    return;
-                }
-                PlanTextDialog.ShowText(FindForm(), simulation ? "Simulation - nothing was changed" : operation, result.Message);
-                if (result.ChangedSomething)
-                {
-                    StatusesChanged?.Invoke(this, EventArgs.Empty);
-                }
-                if (result.NeedsElevation)
-                {
-                    relaunch = ElevatedRelaunch.Offer(FindForm(), result.Message);
-                }
+                relaunch = await body(warnings);
             }
             catch (Exception ex)
             {
@@ -284,38 +300,19 @@ namespace GameManager
             }
         }
 
-        private string BusyNotice()
-        {
-            return "Another operation is running (" + gate.CurrentOperation + "). Try again when it finishes.";
-        }
-
         /// <summary>
         /// Plan (inside the gate), ask the plan's questions (default No), apply (or only show, in simulation mode),
-        /// show the result, and offer an elevated relaunch when Windows denied a write. The lease is taken and
-        /// released here, on the UI thread.
+        /// show the result, and offer an elevated relaunch when Windows denied a write.
         /// </summary>
-        private async Task RunAsync(string operation, Func<List<string>, PatchPlan> makePlan)
+        private Task RunAsync(string operation, Func<List<string>, PatchPlan> makePlan)
         {
-            if (IsDisposed)
-            {
-                return;
-            }
-            IDisposable lease = gate.TryEnter(operation);
-            if (lease == null)
-            {
-                showNotice(BusyNotice());
-                return;
-            }
-            running = true;
-            bool relaunch = false;
-            var warnings = new List<string>();
-            try
+            return RunLeasedAsync(operation, async warnings =>
             {
                 // Planned inside the gate, so the cached DLL cannot change between planning and copying (R33).
                 PatchPlan plan = await Task.Run(() => makePlan(warnings));
                 if (IsDisposed)
                 {
-                    return;
+                    return false;
                 }
                 bool simulation = simulationBox.Checked;
                 bool confirmed = false;
@@ -325,14 +322,14 @@ namespace GameManager
                     if (!confirmed)
                     {
                         showNotice(DisplayText.OperationTitle(plan) + ": cancelled, nothing was changed.");
-                        return;
+                        return false;
                     }
                 }
                 ApplyResult result = await Task.Run(() => service.Apply(plan, confirmed, simulation));
                 warnings.AddRange(result.Warnings);
                 if (IsDisposed)
                 {
-                    return;
+                    return false;
                 }
                 string title = result.Outcome == ApplyOutcome.Simulated ? "Simulation - nothing was changed" : DisplayText.OperationTitle(plan);
                 PlanTextDialog.ShowText(FindForm(), title, result.Message);
@@ -340,34 +337,8 @@ namespace GameManager
                 {
                     StatusesChanged?.Invoke(this, EventArgs.Empty);
                 }
-                if (result.NeedsElevation)
-                {
-                    relaunch = ElevatedRelaunch.Offer(FindForm(), result.Message);
-                }
-            }
-            catch (Exception ex)
-            {
-                // async void callers must never let an exception escape: that would close the app.
-                warnings.Add(operation + ": " + ex.Message);
-                // Files may have changed before the failure: read the statuses again.
-                StatusesChanged?.Invoke(this, EventArgs.Empty);
-            }
-            finally
-            {
-                running = false;
-                lease.Dispose();
-                if (!IsDisposed)
-                {
-                    foreach (string warning in warnings)
-                    {
-                        addWarning(warning);
-                    }
-                }
-            }
-            if (relaunch)
-            {
-                RelaunchStarted?.Invoke(this, EventArgs.Empty);
-            }
+                return result.NeedsElevation && ElevatedRelaunch.Offer(FindForm(), result.Message);
+            });
         }
 
         /// <summary>

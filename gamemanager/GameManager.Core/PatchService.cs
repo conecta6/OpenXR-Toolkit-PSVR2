@@ -96,8 +96,10 @@ namespace GameManager.Core
             IReadOnlyList<string> skipped,
             bool needsElevation,
             string message,
-            IReadOnlyList<string> warnings)
+            IReadOnlyList<string> warnings,
+            bool stoppedByError = false)
         {
+            StoppedByError = stoppedByError;
             Results = results;
             Skipped = skipped;
             NeedsElevation = needsElevation;
@@ -119,9 +121,14 @@ namespace GameManager.Core
         public string Message { get; }
         public IReadOnlyList<string> Warnings { get; }
 
+        /// <summary>
+        /// A game stopped the batch with an unexpected exception; its files may have changed before it.
+        /// </summary>
+        public bool StoppedByError { get; }
+
         public bool ChangedSomething
         {
-            get { return Results.Any(r => r.ChangedSomething); }
+            get { return StoppedByError || Results.Any(r => r.ChangedSomething); }
         }
     }
 
@@ -240,7 +247,9 @@ namespace GameManager.Core
             var skipped = new List<string>();
             var warnings = new List<string>();
             var lines = new List<string>();
+            var unchanged = new List<string>();
             bool needsElevation = false;
+            bool failedUnexpectedly = false;
             foreach (PatchPlan plan in plans)
             {
                 string title = DisplayText.OperationTitle(plan);
@@ -251,6 +260,11 @@ namespace GameManager.Core
                 }
                 if (!plan.HasWork)
                 {
+                    // Nothing to change (for example Steam already put the original back): say why instead of dropping it.
+                    if (plan.Notes.Count > 0)
+                    {
+                        unchanged.Add(title + ": " + string.Join(" ", plan.Notes));
+                    }
                     continue;
                 }
                 if (plan.NeedsConfirmation)
@@ -258,7 +272,26 @@ namespace GameManager.Core
                     skipped.Add(title + ": skipped, because it needs your confirmation; select the game and click Patch. " + string.Join(" ", plan.Confirmations));
                     continue;
                 }
-                ApplyResult result = Apply(plan, false, simulation);
+                if (failedUnexpectedly)
+                {
+                    skipped.Add(title + ": not attempted, because an earlier game stopped the batch with an unexpected error.");
+                    continue;
+                }
+                ApplyResult result;
+                try
+                {
+                    result = Apply(plan, false, simulation);
+                }
+                catch (Exception e)
+                {
+                    // Apply has already recorded what it finished before this went on. The batch stops here, but the
+                    // summary must still say what was done, what failed and what was not tried.
+                    failedUnexpectedly = true;
+                    lines.Add(title + " stopped with an unexpected error: " + e.Message + NL
+                        + "Some of this game's files may have changed; select it and check its status, or use Restore.");
+                    warnings.Add(title + ": unexpected error: " + e.Message);
+                    continue;
+                }
                 results.Add(result);
                 warnings.AddRange(result.Warnings);
                 lines.Add(simulation ? DisplayText.PlanSummary(plan) : result.Message);
@@ -279,15 +312,19 @@ namespace GameManager.Core
             {
                 text.Append(string.Join(NL + NL, lines));
             }
-            else
+            else if (unchanged.Count == 0)
             {
                 text.Append(skipped.Count > 0 ? "Nothing was changed." : "Nothing to do.");
+            }
+            if (unchanged.Count > 0)
+            {
+                text.Append(lines.Count > 0 ? NL + NL : "").Append("Unchanged:").Append(NL).Append(Bullets(unchanged));
             }
             if (skipped.Count > 0)
             {
                 text.Append(NL).Append(NL).Append("Skipped:").Append(NL).Append(Bullets(skipped));
             }
-            return new BatchResult(results, skipped, needsElevation, text.ToString(), warnings);
+            return new BatchResult(results, skipped, needsElevation, text.ToString(), warnings, failedUnexpectedly);
         }
 
         private void Record(PatchPlan plan, ExecutionResult run, PatchState state, List<string> warnings)

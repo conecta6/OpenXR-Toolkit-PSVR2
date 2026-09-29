@@ -81,6 +81,9 @@ namespace GameManager
         // Counts notices, so a status read knows whether one appeared while it was reading and must not be covered.
         private int noticeSequence;
 
+        // True while the status line shows a notice or an error instead of the summary.
+        private bool noticeShowing;
+
         public MainForm(SteamLocator locator, string compatibilityPath, OpenCompositeCache openComposite, PatchPlanner planner, PatchService patchService)
         {
             this.locator = locator ?? throw new ArgumentNullException(nameof(locator));
@@ -247,6 +250,11 @@ namespace GameManager
             if (operationWarnings.Add(line))
             {
                 RenderWarnings();
+                if (!noticeShowing && scanCancellation == null && scanProducedList)
+                {
+                    // Keeps the warning count on the status line current.
+                    ShowStatusLine();
+                }
             }
         }
 
@@ -258,6 +266,7 @@ namespace GameManager
             if (!IsDisposed)
             {
                 noticeSequence++;
+                noticeShowing = true;
                 statusLabel.Text = text;
             }
         }
@@ -315,6 +324,7 @@ namespace GameManager
                 // async void handlers must not let exceptions escape: that would close the app.
                 if (!IsDisposed)
                 {
+                    noticeShowing = true;
                     statusLabel.Text = "Scan failed. Details below.";
                     lastScanWarnings = new[] { ex.ToString() };
                     RenderWarnings();
@@ -375,6 +385,7 @@ namespace GameManager
             {
                 text.Append(' ').Append(offer);
             }
+            noticeShowing = false;
             statusLabel.Text = text.ToString();
         }
 

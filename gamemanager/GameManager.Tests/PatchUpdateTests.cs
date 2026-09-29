@@ -199,6 +199,103 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void ApplyAll_UnexpectedErrorOnTheSecondGame_RecordsTheFirstAndReportsTheRest()
+        {
+            SteamGame second = fx.AddGame(1001, "Second Game");
+            SteamGame third = fx.AddGame(1002, "Third Game");
+            string secondDll = PatchFixture.WriteFileIn(second, "openvr_api.dll", original);
+            string thirdDll = PatchFixture.WriteFileIn(third, "openvr_api.dll", original);
+            var warnings = new List<string>();
+            var plans = new[]
+            {
+                fx.Planner.PlanPatch(fx.Scan(), PatchOptions.None, warnings),
+                fx.Planner.PlanPatch(fx.ScanOf(second, null), PatchOptions.None, warnings),
+                fx.Planner.PlanPatch(fx.ScanOf(third, null), PatchOptions.None, warnings),
+            };
+            PatchExecutor.AfterBackupCopy = (source, temp) =>
+            {
+                if (string.Equals(source, secondDll, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("injected fault");
+                }
+            };
+            BatchResult result;
+            try
+            {
+                result = fx.Service.ApplyAll(plans, false);
+            }
+            finally
+            {
+                PatchExecutor.AfterBackupCopy = null;
+            }
+
+            Assert.AreEqual(1, result.Results.Count);
+            Assert.IsTrue(result.StoppedByError);
+            Assert.IsTrue(result.ChangedSomething);
+            Assert.AreEqual(oc1, FileHash.Sha256(dll));
+            Assert.IsNotNull(fx.FindRecord(dll), "the finished game is recorded");
+            CollectionAssert.AreEqual(original, File.ReadAllBytes(thirdDll), "the third game is not touched");
+            StringAssert.Contains(result.Message, "Patch Beat Saber (620980): done.");
+            StringAssert.Contains(result.Message, "Patch Second Game (1001) stopped with an unexpected error: injected fault");
+            StringAssert.Contains(result.Message, "Patch Third Game (1002): not attempted");
+            Assert.AreEqual(1, result.Skipped.Count);
+        }
+
+        [TestMethod]
+        public void ApplyAll_AGameThatFailsAtAStep_DoesNotStopTheNextOne()
+        {
+            SteamGame second = fx.AddGame(1001, "Second Game");
+            SteamGame third = fx.AddGame(1002, "Third Game");
+            string secondDll = PatchFixture.WriteFileIn(second, "openvr_api.dll", original);
+            string thirdDll = PatchFixture.WriteFileIn(third, "openvr_api.dll", original);
+            var warnings = new List<string>();
+            var plans = new[]
+            {
+                fx.Planner.PlanPatch(fx.Scan(), PatchOptions.None, warnings),
+                fx.Planner.PlanPatch(fx.ScanOf(second, null), PatchOptions.None, warnings),
+                fx.Planner.PlanPatch(fx.ScanOf(third, null), PatchOptions.None, warnings),
+            };
+            // Steam updates the second game after its plan was made: the plan's first check no longer matches.
+            byte[] updated = PatchFixture.OriginalDll(PeFixture.MachineX64, 9);
+            File.WriteAllBytes(secondDll, updated);
+
+            BatchResult result = fx.Service.ApplyAll(plans, false);
+
+            Assert.AreEqual(3, result.Results.Count);
+            Assert.AreEqual(ApplyOutcome.Succeeded, result.Results[0].Outcome, result.Message);
+            Assert.AreEqual(ApplyOutcome.Failed, result.Results[1].Outcome, result.Message);
+            Assert.AreEqual(ApplyOutcome.Succeeded, result.Results[2].Outcome, result.Message);
+            Assert.IsFalse(result.StoppedByError);
+            CollectionAssert.AreEqual(updated, File.ReadAllBytes(secondDll));
+            Assert.AreEqual(oc1, FileHash.Sha256(thirdDll));
+            StringAssert.Contains(result.Message, "Patch Beat Saber (620980): done.");
+            StringAssert.Contains(result.Message, "Patch Second Game (1001) stopped at this step");
+            StringAssert.Contains(result.Message, "Patch Third Game (1002): done.");
+        }
+
+        [TestMethod]
+        public void ApplyAll_PlanWithNothingToDoButNotes_IsReported()
+        {
+            Patch(fx.Scan(), PatchOptions.None);
+            PatchPlan plan = PlanUpdate(fx.Scan());
+
+            BatchResult result = fx.Service.ApplyAll(new[] { plan }, false);
+
+            Assert.AreEqual(0, result.Results.Count);
+            StringAssert.Contains(result.Message, "Unchanged:");
+            StringAssert.Contains(result.Message, "already has the current OpenComposite build");
+            Assert.IsFalse(result.Message.Contains("Nothing to do."));
+        }
+
+        [TestMethod]
+        public void ApplyAll_NoPlansWorthReporting_SaysNothingToDo()
+        {
+            BatchResult result = fx.Service.ApplyAll(new PatchPlan[0], false);
+
+            Assert.AreEqual("Nothing to do.", result.Message);
+        }
+
+        [TestMethod]
         public void ApplyAll_Simulation_ChangesNothing()
         {
             var plans = new[] { fx.Planner.PlanPatch(fx.Scan(), PatchOptions.None, new List<string>()) };

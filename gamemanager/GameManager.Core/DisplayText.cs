@@ -20,8 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 namespace GameManager.Core
 {
@@ -135,6 +137,70 @@ namespace GameManager.Core
                 parts.Add(part);
             }
             return "OpenComposite: " + string.Join(", ", parts);
+        }
+
+        /// <summary>
+        /// "Patch Beat Saber (620980)", "Restore Beat Saber (620980)", "Update OpenComposite in Beat Saber (620980)".
+        /// </summary>
+        public static string OperationTitle(PatchPlan plan)
+        {
+            string verb = plan.Operation switch
+            {
+                PatchOperation.Restore => "Restore ",
+                PatchOperation.Update => "Update OpenComposite in ",
+                _ => "Patch ",
+            };
+            return verb + plan.Game.Name + " (" + plan.Game.AppId.ToString(CultureInfo.InvariantCulture) + ")";
+        }
+
+        /// <summary>
+        /// R16: everything a plan would do, as shown in simulation mode: why it cannot run, the questions it asks,
+        /// the numbered steps, and notes.
+        /// </summary>
+        public static string PlanSummary(PatchPlan plan)
+        {
+            var text = new StringBuilder(OperationTitle(plan));
+            if (plan.Blockers.Count > 0)
+            {
+                AppendSection(text, "Not possible:", plan.Blockers, false);
+            }
+            if (plan.Confirmations.Count > 0)
+            {
+                AppendSection(text, "Asks first (default No):", plan.Confirmations, false);
+            }
+            var steps = new List<string>();
+            foreach (PatchAction action in plan.AllActions)
+            {
+                steps.Add(action.Description);
+            }
+            if (steps.Count > 0)
+            {
+                AppendSection(text, "Steps:", steps, true);
+            }
+            else if (plan.CanRun && plan.HasWork)
+            {
+                AppendSection(text, "Steps:", new[] { "No file changes; only the patch records are updated." }, false);
+            }
+            else if (plan.CanRun)
+            {
+                text.Append(Environment.NewLine).Append(Environment.NewLine).Append("Nothing to do.");
+            }
+            if (plan.Notes.Count > 0)
+            {
+                AppendSection(text, "Notes:", plan.Notes, false);
+            }
+            return text.ToString();
+        }
+
+        private static void AppendSection(StringBuilder text, string title, IReadOnlyList<string> lines, bool numbered)
+        {
+            text.Append(Environment.NewLine).Append(Environment.NewLine).Append(title);
+            for (int i = 0; i < lines.Count; i++)
+            {
+                text.Append(Environment.NewLine)
+                    .Append(numbered ? (i + 1).ToString(CultureInfo.InvariantCulture) + ". " : "- ")
+                    .Append(lines[i]);
+            }
         }
     }
 }

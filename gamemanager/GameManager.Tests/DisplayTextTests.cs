@@ -129,5 +129,26 @@ namespace GameManager.Tests
                 @"Anti-cheat not ruled out: these folders could not be checked: C:\G\Link, C:\G\Locked.",
                 DisplayText.CompatibilityDetails(verdict));
         }
+
+        [TestMethod]
+        public void PlanSummary_ListsQuestionsStepsAndNotes_OrWhyItCannotRun()
+        {
+            string nl = Environment.NewLine;
+            var game = new SteamGame(620980, "Beat Saber", @"C:\Games\Beat Saber", @"C:\Games");
+            string dll = @"C:\Games\Beat Saber\openvr_api.dll";
+            var change = new DllChange(dll, new[] { PatchAction.Verify(dll, new string('a', 64)), PatchAction.Backup(dll, dll + ".bak") }, null, false);
+            var plan = new PatchPlan(PatchOperation.Patch, game, new[] { change }, null, new[] { "Sure?" }, new[] { "A note." });
+            var blocked = new PatchPlan(PatchOperation.Restore, game, new[] { change }, new[] { "No backup." }, null, null);
+
+            Assert.AreEqual(
+                "Patch Beat Saber (620980)" + nl + nl
+                + "Asks first (default No):" + nl + "- Sure?" + nl + nl
+                + "Steps:" + nl + "1. Check " + dll + " (SHA-256 aaaaaaaaaaaa...)" + nl + "2. Back up " + dll + " as openvr_api.dll.bak" + nl + nl
+                + "Notes:" + nl + "- A note.",
+                DisplayText.PlanSummary(plan));
+            Assert.AreEqual(
+                "Restore Beat Saber (620980)" + nl + nl + "Not possible:" + nl + "- No backup.",
+                DisplayText.PlanSummary(blocked));
+        }
     }
 }

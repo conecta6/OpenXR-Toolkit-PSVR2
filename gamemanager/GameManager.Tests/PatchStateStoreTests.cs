@@ -322,6 +322,32 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void KeyOf_DeviceRootedPathWithDotSegments_MatchesThePlainPath()
+        {
+            Assert.AreEqual(PatchState.KeyOf(@"C:\b\openvr_api.dll"), PatchState.KeyOf(@"\\?\C:\a\..\b\openvr_api.dll"));
+        }
+
+        [TestMethod]
+        public void Load_SkippedRecordAndCopyFails_KeepsValidRecordsButRefusesToSave()
+        {
+            // A folder with the copy's name makes File.Copy fail.
+            temp.CreateDirectory(@"AppData\state.json.skipped-20260929-101500");
+            string json = TwoBadRecordsAndOneGood();
+            temp.WriteText(@"AppData\state.json", json);
+            var warnings = new List<string>();
+
+            PatchState state = store.Load(warnings);
+
+            Assert.IsFalse(state.CanSave);
+            Assert.AreEqual(1, state.Records.Count);
+            Assert.IsNotNull(state.Find(@"C:\Games\A\openvr_api.dll"));
+            Assert.AreEqual(2, warnings.Count);
+            StringAssert.Contains(warnings[0], "could not keep a copy");
+            Assert.ThrowsException<InvalidOperationException>(() => store.Save(state));
+            Assert.AreEqual(json, File.ReadAllText(path));
+        }
+
+        [TestMethod]
         public void KeyOf_DeviceRootedPath_MatchesThePlainPath()
         {
             Assert.AreEqual(PatchState.KeyOf(@"C:\x\openvr_api.dll"), PatchState.KeyOf(@"\\?\C:\x\openvr_api.dll"));

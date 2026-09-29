@@ -124,7 +124,7 @@ namespace GameManager.Core
         /// False when state.json exists but could not be read (for example locked by another program): saving would
         /// replace records that were never loaded, so PatchStateStore.Save refuses and no operation runs.
         /// </summary>
-        public bool CanSave { get; }
+        public bool CanSave { get; internal set; }
 
         /// <summary>
         /// Sorted by DLL path.
@@ -171,12 +171,7 @@ namespace GameManager.Core
         /// </summary>
         public static string KeyOf(string dllPath)
         {
-            string full = Path.GetFullPath(dllPath.Replace('/', '\\'));
-            if (full.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
-            {
-                return @"\\" + full.Substring(8);
-            }
-            return full.StartsWith(@"\\?\", StringComparison.Ordinal) ? full.Substring(4) : full;
+            return Path.GetFullPath(PathUtil.StripDevicePrefix(dllPath.Replace('/', '\\')));
         }
 
         /// <summary>
@@ -262,6 +257,12 @@ namespace GameManager.Core
                     PatchRecord record = ToRecord(item);
                     if (record == null)
                     {
+                        string skipped = item == null ? "null" : item.DllPath ?? "no dllPath";
+                        if (skippedCopy == null && !state.CanSave)
+                        {
+                            warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + skipped + ").");
+                            continue;
+                        }
                         if (skippedCopy == null)
                         {
                             // The next save drops the skipped record: keep the file as it was first.
@@ -271,11 +272,12 @@ namespace GameManager.Core
                             }
                             catch (Exception e) when (OpenCompositeCache.IsDiskError(e))
                             {
-                                warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + (item == null ? "null" : item.DllPath ?? "no dllPath") + ") and could not keep a copy of the file (" + e.Message + "). Nothing will overwrite it.");
-                                return new PatchState(false);
+                                warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + skipped + ") and could not keep a copy of the file (" + e.Message + "). The valid records are shown, but Patch, Restore and Update will not run, so nothing overwrites the file.");
+                                state.CanSave = false;
+                                continue;
                             }
                         }
-                        warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + (item == null ? "null" : item.DllPath ?? "no dllPath") + "). It will be dropped at the next save; the file as it was is kept as " + skippedCopy + ".");
+                        warnings.Add("Skipped an invalid patch record in " + FilePath + " (" + skipped + "). It will be dropped at the next save; the file as it was is kept as " + skippedCopy + ".");
                         continue;
                     }
                     if (state.Find(record.DllPath) != null)

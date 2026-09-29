@@ -99,6 +99,23 @@ namespace GameManager.Core
         }
 
         /// <summary>
+        /// Drops the Win32 device prefix: "\\?\C:\x" becomes "C:\x" and "\\?\UNC\server\share" becomes
+        /// "\\server\share". Any other path is returned unchanged.
+        /// </summary>
+        public static string StripDevicePrefix(string path)
+        {
+            if (path == null)
+            {
+                return null;
+            }
+            if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                return @"\\" + path.Substring(8);
+            }
+            return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path.Substring(4) : path;
+        }
+
+        /// <summary>
         /// True for the exceptions Path.GetFullPath throws on a malformed or unusable path.
         /// </summary>
         public static bool IsInvalidPathError(Exception e)

@@ -48,11 +48,12 @@ namespace GameManager.Core
         public IReadOnlyList<string> GetRunningImagePaths()
         {
             var paths = new List<string>();
+            var buffer = new StringBuilder(NativeMethods.MaxLongPath);
             foreach (Process process in Process.GetProcesses())
             {
                 using (process)
                 {
-                    string path = QueryImagePath(process.Id);
+                    string path = QueryImagePath(process.Id, buffer);
                     if (path != null)
                     {
                         paths.Add(path);
@@ -67,6 +68,11 @@ namespace GameManager.Core
         /// </summary>
         internal static string QueryImagePath(int processId)
         {
+            return QueryImagePath(processId, new StringBuilder(NativeMethods.MaxLongPath));
+        }
+
+        private static string QueryImagePath(int processId, StringBuilder buffer)
+        {
             IntPtr handle = NativeMethods.OpenProcess(NativeMethods.ProcessQueryLimitedInformation, false, processId);
             if (handle == IntPtr.Zero)
             {
@@ -74,7 +80,7 @@ namespace GameManager.Core
             }
             try
             {
-                var buffer = new StringBuilder(NativeMethods.MaxLongPath);
+                buffer.Clear();
                 int size = buffer.Capacity;
                 return NativeMethods.QueryFullProcessImageName(handle, 0, buffer, ref size) ? buffer.ToString(0, size) : null;
             }
@@ -97,6 +103,12 @@ namespace GameManager.Core
 
         /// <summary>Windows denies write access to a target DLL (R22: an elevated relaunch may help).</summary>
         AccessDenied,
+
+        /// <summary>
+        /// A target cannot be examined or written for a reason elevation does not fix: it changed since the scan,
+        /// its path is too long or is a folder, or it is read-only.
+        /// </summary>
+        FileProblem,
     }
 
     public sealed class GuardResult
@@ -190,10 +202,39 @@ namespace GameManager.Core
 
             foreach (string file in targetFiles)
             {
-                if (!File.Exists(file))
+                if (!PathUtil.IsFullyQualified(file))
                 {
-                    // Nothing there yet (a restore of a deleted DLL, a new ini): nothing can hold it open.
-                    continue;
+                    throw new ArgumentException("A target path is not absolute: \"" + file + "\".", nameof(targetFiles));
+                }
+                GuardResult refusal = ProbeTarget(file);
+                if (refusal != null)
+                {
+                    return refusal;
+                }
+            }
+            return GuardResult.Ok;
+        }
+
+        /// <summary>
+        /// Null when the target can be opened for exclusive write, or does not exist yet in a folder that does (a
+        /// restore of a deleted DLL, a new opencomposite.ini). Anything that cannot be examined is refused.
+        /// </summary>
+        private static GuardResult ProbeTarget(string file)
+        {
+            try
+            {
+                FileAttributes attributes;
+                try
+                {
+                    attributes = File.GetAttributes(file);
+                }
+                catch (FileNotFoundException)
+                {
+                    return null;
+                }
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    return GuardResult.Refuse(GuardVerdict.FileProblem, file + " is a folder, not a file. Game Manager will not touch it.");
                 }
                 try
                 {
@@ -205,14 +246,38 @@ namespace GameManager.Core
                 }
                 catch (UnauthorizedAccessException e)
                 {
+                    if ((attributes & FileAttributes.ReadOnly) != 0)
+                    {
+                        return GuardResult.Refuse(GuardVerdict.FileProblem, file + " is marked read-only. Clear the read-only attribute in its Properties and try again.");
+                    }
                     return GuardResult.Refuse(GuardVerdict.AccessDenied, "Windows does not allow Game Manager to change " + file + " (" + e.Message + ").");
                 }
-                catch (IOException e)
-                {
-                    return GuardResult.Refuse(GuardVerdict.FileInUse, file + " is in use by another program (" + e.Message + "). Close the game, and wait for Steam if it is updating it, then try again.");
-                }
+                return null;
             }
-            return GuardResult.Ok;
+            catch (UnauthorizedAccessException e)
+            {
+                return GuardResult.Refuse(GuardVerdict.AccessDenied, "Windows does not allow Game Manager to look at " + file + " (" + e.Message + ").");
+            }
+            catch (PathTooLongException)
+            {
+                return GuardResult.Refuse(GuardVerdict.FileProblem, "The path is too long for Game Manager to change: " + file);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return GuardResult.Refuse(GuardVerdict.FileProblem, "The folder of " + file + " is gone. The game folder changed since the scan: refresh the list and try again.");
+            }
+            catch (FileNotFoundException)
+            {
+                return GuardResult.Refuse(GuardVerdict.FileProblem, file + " disappeared. It changed since the scan: refresh the list and try again.");
+            }
+            catch (IOException e)
+            {
+                return GuardResult.Refuse(GuardVerdict.FileInUse, file + " is in use by another program (" + e.Message + "). Close the game, and wait for Steam if it is updating it, then try again.");
+            }
+            catch (Exception e) when (PathUtil.IsInvalidPathError(e))
+            {
+                return GuardResult.Refuse(GuardVerdict.FileProblem, "Game Manager cannot examine " + file + " (" + e.Message + ").");
+            }
         }
 
         /// <summary>
@@ -240,16 +305,7 @@ namespace GameManager.Core
                 {
                     return null;
                 }
-                string path = buffer.ToString(0, (int)length);
-                if (path.StartsWith(@"\\?\UNC\", StringComparison.Ordinal))
-                {
-                    return @"\\" + path.Substring(8);
-                }
-                if (path.StartsWith(@"\\?\", StringComparison.Ordinal))
-                {
-                    return path.Substring(4);
-                }
-                return path;
+                return PathUtil.StripDevicePrefix(buffer.ToString(0, (int)length));
             }
         }
     }

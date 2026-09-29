@@ -141,6 +141,59 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        public void Check_ReadOnlyTarget_RefusesWithoutSuggestingElevation()
+        {
+            File.SetAttributes(dll, FileAttributes.ReadOnly);
+            try
+            {
+                GuardResult result = guard.Check(gameDir, new[] { dll });
+
+                Assert.AreEqual(GuardVerdict.FileProblem, result.Verdict);
+                Assert.IsFalse(result.NeedsElevation);
+                StringAssert.Contains(result.Message, "read-only");
+            }
+            finally
+            {
+                File.SetAttributes(dll, FileAttributes.Normal);
+            }
+        }
+
+        [TestMethod]
+        public void Check_TargetInAFolderThatIsGone_Refuses()
+        {
+            GuardResult result = guard.Check(gameDir, new[] { Path.Combine(gameDir, @"vanished\openvr_api.dll") });
+
+            Assert.AreEqual(GuardVerdict.FileProblem, result.Verdict);
+            Assert.IsFalse(result.NeedsElevation);
+            StringAssert.Contains(result.Message, "changed since the scan");
+        }
+
+        [TestMethod]
+        public void Check_TargetThatIsAFolder_Refuses()
+        {
+            GuardResult result = guard.Check(gameDir, new[] { temp.CreateDirectory(@"Game\bin\openvr_api.dll.d") });
+
+            Assert.AreEqual(GuardVerdict.FileProblem, result.Verdict);
+        }
+
+        [TestMethod]
+        public void Check_TargetPathTooLong_RefusesWithItsOwnMessage()
+        {
+            string tooLong = Path.Combine(gameDir, new string('a', 300), "openvr_api.dll");
+
+            GuardResult result = guard.Check(gameDir, new[] { tooLong });
+
+            Assert.AreEqual(GuardVerdict.FileProblem, result.Verdict);
+            StringAssert.Contains(result.Message, "too long");
+        }
+
+        [TestMethod]
+        public void Check_RelativeTargetPath_Throws()
+        {
+            Assert.ThrowsException<ArgumentException>(() => guard.Check(gameDir, new[] { @"bin\openvr_api.dll" }));
+        }
+
+        [TestMethod]
         [Timeout(30000)]
         public void Check_InstallFolderIsJunction_ProcessUnderItsTarget_IsRefused()
         {

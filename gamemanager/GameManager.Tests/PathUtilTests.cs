@@ -67,6 +67,24 @@ namespace GameManager.Tests
         }
 
         [TestMethod]
+        [DataRow(@"\\?\C:\Games\x", @"C:\Games\x")]
+        [DataRow(@"\\?\UNC\server\share\x", @"\\server\share\x")]
+        [DataRow(@"\\?\unc\server\share", @"\\server\share")]
+        [DataRow(@"C:\Games\x", @"C:\Games\x")]
+        [DataRow(@"\\server\share", @"\\server\share")]
+        [DataRow("", "")]
+        public void StripDevicePrefix_DropsOnlyTheDevicePrefix(string path, string expected)
+        {
+            Assert.AreEqual(expected, PathUtil.StripDevicePrefix(path));
+        }
+
+        [TestMethod]
+        public void StripDevicePrefix_Null_ReturnsNull()
+        {
+            Assert.IsNull(PathUtil.StripDevicePrefix(null));
+        }
+
+        [TestMethod]
         public void NormalizeDirectory_UncPath_IsKept()
         {
             Assert.AreEqual(@"\\server\share\SteamLibrary", PathUtil.NormalizeDirectory(@"\\server\share\SteamLibrary\"));

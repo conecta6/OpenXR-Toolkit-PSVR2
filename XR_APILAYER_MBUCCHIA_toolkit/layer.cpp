@@ -218,6 +218,7 @@ namespace {
             m_configManager->setDefault(config::SettingScaling, 100);
             m_configManager->setDefault(config::SettingAnamorphic, -100);
             m_configManager->setDefault(config::SettingSharpness, 20);
+            m_configManager->setDefault(config::SettingCASDarkProtection, 50);
             // We default mip-map biasing to Off with OpenComposite since it's causing issues with certain apps. Users
             // have the (Expert) option to turn it back on.
             m_configManager->setEnumDefault(config::SettingMipMapBias,
@@ -255,6 +256,7 @@ namespace {
             m_configManager->setDefault(config::SettingPostColorGainB, 500);
             m_configManager->setDefault(config::SettingPostVibrance, 0);
             m_configManager->setDefault(config::SettingPostColorSpace, 0);
+            m_configManager->setDefault(config::SettingPostDither, 1);
             m_configManager->setDefault(config::SettingPostHighlights, 1000);
             m_configManager->setDefault(config::SettingPostShadows, 0);
             m_configManager->setDefault(config::SettingPostFakeHDR, 1000);

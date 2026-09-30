@@ -131,6 +131,7 @@ namespace toolkit {
         const std::string SettingScaling = "scaling";
         const std::string SettingAnamorphic = "anamorphic";
         const std::string SettingSharpness = "sharpness";
+        const std::string SettingCASDarkProtection = "cas_dark_protection";
         const std::string SettingMipMapBias = "mipmap_bias";
         const std::string SettingICD = "world_scale";
         const std::string SettingFOVType = "fov_type";
@@ -177,6 +178,7 @@ namespace toolkit {
         const std::string SettingPostSaturation = "post_saturation";
         const std::string SettingPostVibrance = "post_vibrance";
         const std::string SettingPostColorSpace = "post_color_space";
+        const std::string SettingPostDither = "post_dither";
         const std::string SettingPostColorGainR = "post_gain_r";
         const std::string SettingPostColorGainG = "post_gain_g";
         const std::string SettingPostColorGainB = "post_gain_b";

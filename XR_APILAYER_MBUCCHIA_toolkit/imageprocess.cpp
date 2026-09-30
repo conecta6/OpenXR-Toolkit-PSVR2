@@ -43,8 +43,8 @@ namespace {
         XrVector4f Params4; // ChromaticCorrectionR, ChromaticCorrectionG, ChromaticCorrectionB (-1..+1 params)
                             // Eye (0 = left, 1 = right)
         XrVector4f Params5; // ColorSpace matrix row 0 (linear RGB -> linear RGB), UseColorSpace (0 = off, 1 = on)
-        XrVector4f Params6; // ColorSpace matrix row 1
-        XrVector4f Params7; // ColorSpace matrix row 2
+        XrVector4f Params6; // ColorSpace matrix row 1, DitherAmplitude (0 = off, else 1 / (2^bits - 1) of the output)
+        XrVector4f Params7; // ColorSpace matrix row 2, OutputIsSRGB (0 = no, 1 = yes)
     };
 
     class ImageProcessor : public IImageProcessor {
@@ -85,6 +85,11 @@ namespace {
 
             // Patch the eye.
             config->Params4.w = (float)eye.value_or(utilities::Eye::Both);
+
+            // Patch the dithering, which depends on the format of the output.
+            const auto outputFormat = output->getInfo().format;
+            config->Params6.w = m_useDither ? GetDitherAmplitude(outputFormat) : 0.0f;
+            config->Params7.w = m_device->isTextureFormatSRGB(outputFormat) ? 1.0f : 0.0f;
 
             // TODO: We can use an IShaderBuffer cache per swapchain and avoid this every frame.
             m_cbParams->uploadData(config, sizeof(*config));
@@ -133,11 +138,13 @@ namespace {
                        m_configManager->hasChanged(SettingPostColorGainB) ||
                        m_configManager->hasChanged(SettingPostChromaticCorrectionR) ||
                        m_configManager->hasChanged(SettingPostChromaticCorrectionB) ||
-                       m_configManager->hasChanged(SettingPostColorSpace);
+                       m_configManager->hasChanged(SettingPostColorSpace) ||
+                       m_configManager->hasChanged(SettingPostDither);
             } else {
                 return m_configManager->hasChanged(SettingPostColorGainR) ||
                        m_configManager->hasChanged(SettingPostColorGainB) ||
-                       m_configManager->hasChanged(SettingPostColorSpace);
+                       m_configManager->hasChanged(SettingPostColorSpace) ||
+                       m_configManager->hasChanged(SettingPostDither);
             }
         }
 
@@ -208,6 +215,9 @@ namespace {
             m_config.Params5 = kColorSpace[colorSpace][0];
             m_config.Params6 = kColorSpace[colorSpace][1];
             m_config.Params7 = kColorSpace[colorSpace][2];
+            // The 4th component of the other rows is kept free: the dithering is patched JIT in process().
+
+            m_useDither = m_configManager->getValue(SettingPostDither) != 0;
 
             // CA Correction stuff.
             if (m_mode == PostProcessType::CACorrection) {
@@ -219,6 +229,33 @@ namespace {
             } else {
                 m_config.Params3.w = 0;
             }
+        }
+
+        // Size of one code value of the output format (the amplitude of the dithering noise), 0 when none is needed.
+        static float GetDitherAmplitude(int64_t format) {
+            switch ((DXGI_FORMAT)format) {
+            case DXGI_FORMAT_R32G32B32A32_FLOAT:
+            case DXGI_FORMAT_R16G16B16A16_FLOAT:
+            case DXGI_FORMAT_R11G11B10_FLOAT:
+            case DXGI_FORMAT_R32G32B32_FLOAT:
+                // Floating point formats do not band.
+                return 0.0f;
+
+            case DXGI_FORMAT_R16G16B16A16_UNORM:
+                return 1.0f / 65535.0f;
+
+            case DXGI_FORMAT_R10G10B10A2_UNORM:
+                return 1.0f / 1023.0f;
+
+            case DXGI_FORMAT_R8G8B8A8_UNORM:
+            case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+            case DXGI_FORMAT_B8G8R8A8_UNORM:
+            case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+            case DXGI_FORMAT_B8G8R8X8_UNORM:
+            case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            default:
+                return 1.0f / 255.0f;
+            };
         }
 
         static std::array<DirectX::XMINT4, 3> GetParams(const IConfigManager* configManager, size_t index) {
@@ -277,6 +314,7 @@ namespace {
         std::shared_ptr<IShaderBuffer> m_cbParams;
 
         PostProcessType m_mode{PostProcessType::Off};
+        bool m_useDither{false};
         ImageProcessorConfig m_config{};
     };
 

@@ -42,6 +42,7 @@ namespace {
     struct CASConstants {
         uint32_t Const0[4];
         uint32_t Const1[4];
+        float Const2[4];
     };
 
     class CASUpscaler : public IImageProcessor {
@@ -85,6 +86,10 @@ namespace {
                      static_cast<AF1>(inputHeight),
                      static_cast<AF1>(outputWidth),
                      static_cast<AF1>(outputHeight));
+
+            // Dark protection: [0..100] -> perceptual luminance under which sharpening fades out [0..0.5].
+            config->Const2[0] = m_configManager->getValue(SettingCASDarkProtection) / 200.f;
+            config->Const2[1] = config->Const2[2] = config->Const2[3] = 0.f;
 
             // TODO: We can use an IShaderBuffer cache per swapchain and avoid this every frame.
             m_configBuffer->uploadData(config, sizeof(*config));

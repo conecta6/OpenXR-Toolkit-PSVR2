@@ -20,6 +20,7 @@
 cbuffer cb : register(b0) {
     uint4 const0;
     uint4 const1;
+    float4 const2; // x: dark protection threshold (perceptual luminance, 0 = off)
 };
 
 Texture2D InputTexture : register(t0);
@@ -63,6 +64,19 @@ void CasInput(inout AF1 r, inout AF1 g, inout AF1 b) {
 
 #include "ffx_cas.h"
 
+// Fade the sharpening out in dark areas, where CAS mostly amplifies the game's noise and grain.
+// Only possible when sharpening only (input and output pixels match).
+AF3 ProtectDark(AF3 c, ASU2 p) {
+#if CAS_SAMPLE_SHARPEN_ONLY
+    if (const2.x > 0) {
+        const AF3 original = InputTexture.Load(int3(p, 0)).rgb;
+        const AF1 luma = sqrt(max(dot(original, AF3(0.2126, 0.7152, 0.0722)), 0)); // Rough perceptual luminance.
+        c = lerp(original, c, smoothstep(0, 1, saturate(luma / const2.x)));
+    }
+#endif
+    return c;
+}
+
 [numthreads(CAS_THREAD_GROUP_SIZE, 1, 1)]
 void mainCS(uint3 LocalThreadId
                                                : SV_GroupThreadID, uint3 WorkGroupId
@@ -100,19 +114,19 @@ void mainCS(uint3 LocalThreadId
     AF3 c;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(c, 1);
+    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
     gxy.x += 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(c, 1);
+    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
     gxy.y += 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(c, 1);
+    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
     gxy.x -= 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(c, 1);
+    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
 
 #endif
 }

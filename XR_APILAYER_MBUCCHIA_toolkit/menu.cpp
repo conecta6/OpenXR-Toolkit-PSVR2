@@ -1212,6 +1212,16 @@ namespace {
                                          100,
                                          MenuEntry::FmtPercent});
 
+                MenuGroup casDarkGroup(this, [&] { return getCurrentScalingType() == ScalingType::CAS; });
+                m_menuEntries.push_back({MenuIndent::SubGroupIndent,
+                                         "Dark protection",
+                                         MenuEntryType::Slider,
+                                         SettingCASDarkProtection,
+                                         0,
+                                         100,
+                                         MenuEntry::FmtPercent});
+                casDarkGroup.finalize();
+
                 m_menuEntries.push_back({MenuIndent::SubGroupIndent,
                                          "Anamorphic",
                                          MenuEntryType::Choice,
@@ -1624,6 +1634,13 @@ namespace {
                                      0,
                                      MenuEntry::LastVal<PostColorSpaceType>(),
                                      MenuEntry::FmtEnum<PostColorSpaceType>});
+            m_menuEntries.push_back({MenuIndent::OptionIndent,
+                                     "Dithering",
+                                     MenuEntryType::Choice,
+                                     SettingPostDither,
+                                     0,
+                                     MenuEntry::LastVal<OffOnType>(),
+                                     MenuEntry::FmtEnum<OffOnType>});
 
             m_menuEntries.push_back(
                 {MenuIndent::OptionIndent, "World scale", MenuEntryType::Slider, SettingICD, 1, 10000, [&](int value) {

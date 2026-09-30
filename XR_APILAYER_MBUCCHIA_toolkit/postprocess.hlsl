@@ -29,8 +29,8 @@ cbuffer config : register(b0) {
     float4 Params3;  // Highlights, Shadows, Vibrance (0..1 params), UseCA (0 = off, 1 = on)
     float4 Params4;  // ChromaticCorrectionR, ChromaticCorrectionG, ChromaticCorrectionB (-1..+1 params), Eye (0 = left, 1 = right)
     float4 Params5;  // ColorSpace matrix row 0 (linear RGB -> linear RGB), UseColorSpace (0 = off, 1 = on)
-    float4 Params6;  // ColorSpace matrix row 1
-    float4 Params7;  // ColorSpace matrix row 2
+    float4 Params6;  // ColorSpace matrix row 1, DitherAmplitude (0 = off, else 1 / (2^bits - 1) of the output format)
+    float4 Params7;  // ColorSpace matrix row 2, OutputIsSRGB (0 = no, 1 = yes: the hardware encodes on write)
 };
 
 SamplerState sourceSampler : register(s0);
@@ -151,6 +151,18 @@ float3 AdjustColorSpace(float3 color) {
   return saturate(float3(dot(Params5.xyz, color), dot(Params6.xyz, color), dot(Params7.xyz, color)));
 }
 
+// hide banding in smooth gradients with a tiny static noise, applied in the domain the output is stored in.
+// screen-space hash, the idea comes from the "Advanced VR Rendering" talk by Alex Vlachos (Valve, GDC 2015).
+float3 ApplyDither(float3 color, float2 pos) {
+  float3 n = dot(float2(171.0, 231.0), pos);
+  n = frac(n / float3(103.0, 71.0, 97.0)) - 0.5;
+  if (Params7.w) {
+    // sRGB targets are encoded by the hardware on write: dither in the gamma domain, where the steps are visible.
+    return srgb2linear(linear2srgb(color) + n * Params6.w);
+  }
+  return color + n * Params6.w;
+}
+
 // -1..+1
 float3 AdjustGains(float3 color, float3 gains) {
   return saturate(color * (gains + 1));
@@ -248,6 +260,11 @@ float4 mainPostProcess(in float4 position : SV_POSITION, in float2 texcoord : TE
   color = linear2srgb(color);
 #endif
 
+  // dither the output.
+  if (Params6.w) {
+    color = ApplyDither(color, position.xy);
+  }
+
   return float4(saturate(color), 1.0);
 }
 
@@ -291,6 +308,11 @@ float4 mainPassThrough(in float4 position : SV_POSITION, in float2 texcoord : TE
 #endif
 
 #endif
+
+  // dither the output.
+  if (Params6.w) {
+    color = ApplyDither(color, position.xy);
+  }
 
   return float4(saturate(color), 1.0);
 }

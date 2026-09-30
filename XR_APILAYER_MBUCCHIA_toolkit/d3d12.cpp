@@ -2241,7 +2241,14 @@ namespace {
                 return;
             }
 
-            auto wrappedContext = std::make_shared<D3D12Context>(shared_from_this(), context);
+            // The device may be in the middle of being destroyed (refcount already at 0) while the app still calls
+            // into our hooks from another thread. Do not use shared_from_this(), which would throw bad_weak_ptr.
+            const auto self = weak_from_this().lock();
+            if (!self) {
+                return;
+            }
+
+            auto wrappedContext = std::make_shared<D3D12Context>(self, context);
 
             if (!numRenderTargetDescriptors) {
                 INVOKE_EVENT(unsetRenderTargetEvent, wrappedContext);
@@ -2261,7 +2268,7 @@ namespace {
                 ID3D12Resource* const resource = it->second.first;
                 const D3D12_RESOURCE_DESC& resourceDesc = it->second.second;
 
-                renderTarget = std::make_shared<D3D12Texture>(shared_from_this(),
+                renderTarget = std::make_shared<D3D12Texture>(self,
                                                               getTextureInfo(resourceDesc),
                                                               resourceDesc,
                                                               resource,
@@ -2285,10 +2292,17 @@ namespace {
                 return;
             }
 
-            auto wrappedContext = std::make_shared<D3D12Context>(shared_from_this(), context);
+            // The device may be in the middle of being destroyed (refcount already at 0) while the app still calls
+            // into our hooks from another thread. Do not use shared_from_this(), which would throw bad_weak_ptr.
+            const auto self = weak_from_this().lock();
+            if (!self) {
+                return;
+            }
+
+            auto wrappedContext = std::make_shared<D3D12Context>(self, context);
 
             const D3D12_RESOURCE_DESC& sourceTextureDesc = pSrcResource->GetDesc();
-            auto source = std::make_shared<D3D12Texture>(shared_from_this(),
+            auto source = std::make_shared<D3D12Texture>(self,
                                                          getTextureInfo(sourceTextureDesc),
                                                          sourceTextureDesc,
                                                          pSrcResource,
@@ -2298,7 +2312,7 @@ namespace {
                                                          m_rvHeap);
 
             const D3D12_RESOURCE_DESC& destinationTextureDesc = pSrcResource->GetDesc();
-            auto destination = std::make_shared<D3D12Texture>(shared_from_this(),
+            auto destination = std::make_shared<D3D12Texture>(self,
                                                               getTextureInfo(destinationTextureDesc),
                                                               destinationTextureDesc,
                                                               pDstResource,

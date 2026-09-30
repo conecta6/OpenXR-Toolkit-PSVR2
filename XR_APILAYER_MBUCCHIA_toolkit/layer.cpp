@@ -219,6 +219,7 @@ namespace {
             m_configManager->setDefault(config::SettingAnamorphic, -100);
             m_configManager->setDefault(config::SettingSharpness, 20);
             m_configManager->setDefault(config::SettingCASDarkProtection, 50);
+            m_configManager->setDefault(config::SettingCASLensMask, 0);
             // We default mip-map biasing to Off with OpenComposite since it's causing issues with certain apps. Users
             // have the (Expert) option to turn it back on.
             m_configManager->setEnumDefault(config::SettingMipMapBias,
@@ -1017,6 +1018,11 @@ namespace {
                         Log("Unknown upscaling type, falling back to no upscaling\n");
                         m_upscaleMode = config::ScalingType::None;
                         break;
+                    }
+
+                    // An upscaler created after the calibration still needs the projection centers.
+                    if (m_upscaler && !m_needCalibrateEyeProjections) {
+                        m_upscaler->setViewProjectionCenters(m_projCenters[0], m_projCenters[1]);
                     }
 
                     uint32_t renderWidth = m_displayWidth;
@@ -2242,6 +2248,10 @@ namespace {
 
                         if (m_variableRateShader) {
                             m_variableRateShader->setViewProjectionCenters(m_projCenters[0], m_projCenters[1]);
+                        }
+
+                        if (m_upscaler) {
+                            m_upscaler->setViewProjectionCenters(m_projCenters[0], m_projCenters[1]);
                         }
 
                         m_needCalibrateEyeProjections = false;

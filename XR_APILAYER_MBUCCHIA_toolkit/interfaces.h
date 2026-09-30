@@ -132,6 +132,7 @@ namespace toolkit {
         const std::string SettingAnamorphic = "anamorphic";
         const std::string SettingSharpness = "sharpness";
         const std::string SettingCASDarkProtection = "cas_dark_protection";
+        const std::string SettingCASLensMask = "cas_lens_mask";
         const std::string SettingMipMapBias = "mipmap_bias";
         const std::string SettingICD = "world_scale";
         const std::string SettingFOVType = "fov_type";
@@ -715,6 +716,10 @@ namespace toolkit {
                                  std::vector<std::shared_ptr<ITexture>>& textures,
                                  std::array<uint8_t, 1024>& blob,
                                  std::optional<utilities::Eye> eye = std::nullopt) = 0;
+
+            // Optional: the projection center of each eye, in NDC ([-1,+1], +up).
+            virtual void setViewProjectionCenters(XrVector2f left, XrVector2f right) {
+            }
         };
 
         struct IFrameAnalyzer {

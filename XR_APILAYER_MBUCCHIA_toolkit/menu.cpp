@@ -1220,6 +1220,13 @@ namespace {
                                          0,
                                          100,
                                          MenuEntry::FmtPercent});
+                m_menuEntries.push_back({MenuIndent::SubGroupIndent,
+                                         "Lens centre only",
+                                         MenuEntryType::Slider,
+                                         SettingCASLensMask,
+                                         0,
+                                         100,
+                                         MenuEntry::FmtPercent});
                 casDarkGroup.finalize();
 
                 m_menuEntries.push_back({MenuIndent::SubGroupIndent,

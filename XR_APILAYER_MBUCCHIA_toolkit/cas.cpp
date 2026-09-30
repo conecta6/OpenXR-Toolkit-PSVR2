@@ -63,6 +63,11 @@ namespace {
         void update() override {
         }
 
+        void setViewProjectionCenters(XrVector2f left, XrVector2f right) override {
+            m_projCenters[0] = left;
+            m_projCenters[1] = right;
+        }
+
         void process(std::shared_ptr<ITexture> input,
                      std::shared_ptr<ITexture> output,
                      std::vector<std::shared_ptr<ITexture>>& textures,
@@ -89,7 +94,22 @@ namespace {
 
             // Dark protection: [0..100] -> perceptual luminance under which sharpening fades out [0..0.5].
             config->Const2[0] = m_configManager->getValue(SettingCASDarkProtection) / 200.f;
-            config->Const2[1] = config->Const2[2] = config->Const2[3] = 0.f;
+
+            // Lens mask: [1..100] -> radius of the sharp zone [1.6..0.4], centered on the projection center of the eye.
+            // The radius is in units of half the image height, the same as in the shader. 0 means off.
+            // The mask needs the input and output pixels to match, so it only applies when sharpening only.
+            const int lensMask = m_configManager->getValue(SettingCASLensMask);
+            if (m_isSharpenOnly && lensMask > 0) {
+                const auto viewEye = eye.value_or(utilities::Eye::Left);
+                const auto center = viewEye == utilities::Eye::Both
+                                        ? XrVector2f{0.5f, 0.5f}
+                                        : utilities::NdcToScreen(m_projCenters[static_cast<uint32_t>(viewEye)]);
+                config->Const2[1] = 1.6f - 1.2f * (std::min(lensMask, 100) / 100.f);
+                config->Const2[2] = center.x;
+                config->Const2[3] = center.y;
+            } else {
+                config->Const2[1] = config->Const2[2] = config->Const2[3] = 0.f;
+            }
 
             // TODO: We can use an IShaderBuffer cache per swapchain and avoid this every frame.
             m_configBuffer->uploadData(config, sizeof(*config));
@@ -126,6 +146,9 @@ namespace {
         const std::shared_ptr<IConfigManager> m_configManager;
         const std::shared_ptr<IDevice> m_device;
         const bool m_isSharpenOnly;
+
+        // Projection centers in NDC, until calibrated we assume the center of the image.
+        XrVector2f m_projCenters[utilities::ViewCount]{{0.f, 0.f}, {0.f, 0.f}};
 
         std::shared_ptr<IComputeShader> m_shaderCAS;
         std::shared_ptr<IShaderBuffer> m_configBuffer;

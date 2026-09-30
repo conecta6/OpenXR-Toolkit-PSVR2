@@ -21,6 +21,7 @@ cbuffer cb : register(b0) {
     uint4 const0;
     uint4 const1;
     float4 const2; // x: dark protection threshold (perceptual luminance, 0 = off)
+                   // y: lens mask radius (0 = off), zw: lens center (UV)
 };
 
 Texture2D InputTexture : register(t0);
@@ -64,14 +65,30 @@ void CasInput(inout AF1 r, inout AF1 g, inout AF1 b) {
 
 #include "ffx_cas.h"
 
-// Fade the sharpening out in dark areas, where CAS mostly amplifies the game's noise and grain.
+// Fade the sharpening out in dark areas, where CAS mostly amplifies the game's noise and grain, and toward the edge of
+// the lens, where the image is blurry and sharpening only adds shimmer.
 // Only possible when sharpening only (input and output pixels match).
-AF3 ProtectDark(AF3 c, ASU2 p) {
+AF3 BlendSharpening(AF3 c, ASU2 p) {
 #if CAS_SAMPLE_SHARPEN_ONLY
-    if (const2.x > 0) {
+    if (const2.x > 0 || const2.y > 0) {
         const AF3 original = InputTexture.Load(int3(p, 0)).rgb;
-        const AF1 luma = sqrt(max(dot(original, AF3(0.2126, 0.7152, 0.0722)), 0)); // Rough perceptual luminance.
-        c = lerp(original, c, smoothstep(0, 1, saturate(luma / const2.x)));
+        AF1 weight = 1;
+
+        if (const2.x > 0) {
+            const AF1 luma = sqrt(max(dot(original, AF3(0.2126, 0.7152, 0.0722)), 0)); // Rough perceptual luminance.
+            weight *= smoothstep(0, 1, saturate(luma / const2.x));
+        }
+
+        if (const2.y > 0) {
+            // Distance to the lens center in units of half the image height (1 is the top/bottom edge of the image).
+            uint width, height;
+            InputTexture.GetDimensions(width, height);
+            const AF2 uv = (AF2(p) + 0.5) / AF2(width, height);
+            const AF1 dist = length((uv - const2.zw) * AF2((AF1)width / (AF1)height, 1)) * 2;
+            weight *= 1 - smoothstep(const2.y * 0.6, const2.y, dist);
+        }
+
+        c = lerp(original, c, weight);
     }
 #endif
     return c;
@@ -114,19 +131,19 @@ void mainCS(uint3 LocalThreadId
     AF3 c;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
     gxy.x += 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
     gxy.y += 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
     gxy.x -= 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(ProtectDark(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
 
 #endif
 }

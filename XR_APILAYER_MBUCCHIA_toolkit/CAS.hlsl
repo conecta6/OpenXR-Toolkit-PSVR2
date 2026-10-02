@@ -131,19 +131,23 @@ void mainCS(uint3 LocalThreadId
     AF3 c;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    // Disabled for testing: OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(c, 1);
     gxy.x += 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    // Disabled for testing: OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(c, 1);
     gxy.y += 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    // Disabled for testing: OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(c, 1);
     gxy.x -= 8u;
 
     CasFilter(c.r, c.g, c.b, gxy, const0, const1, sharpenOnly);
-    OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    // Disabled for testing: OutputTexture[ASU2(gxy)] = AF4(BlendSharpening(c, ASU2(gxy)), 1);
+    OutputTexture[ASU2(gxy)] = AF4(c, 1);
 
 #endif
 }

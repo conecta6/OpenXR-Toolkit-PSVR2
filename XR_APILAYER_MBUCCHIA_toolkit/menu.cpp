@@ -1212,22 +1212,23 @@ namespace {
                                          100,
                                          MenuEntry::FmtPercent});
 
-                MenuGroup casDarkGroup(this, [&] { return getCurrentScalingType() == ScalingType::CAS; });
-                m_menuEntries.push_back({MenuIndent::SubGroupIndent,
-                                         "Dark protection",
-                                         MenuEntryType::Slider,
-                                         SettingCASDarkProtection,
-                                         0,
-                                         100,
-                                         MenuEntry::FmtPercent});
-                m_menuEntries.push_back({MenuIndent::SubGroupIndent,
-                                         "Lens centre only",
-                                         MenuEntryType::Slider,
-                                         SettingCASLensMask,
-                                         0,
-                                         100,
-                                         MenuEntry::FmtPercent});
-                casDarkGroup.finalize();
+                // Disabled for testing: Dark protection, Lens centre only.
+                // MenuGroup casDarkGroup(this, [&] { return getCurrentScalingType() == ScalingType::CAS; });
+                // m_menuEntries.push_back({MenuIndent::SubGroupIndent,
+                //                          "Dark protection",
+                //                          MenuEntryType::Slider,
+                //                          SettingCASDarkProtection,
+                //                          0,
+                //                          100,
+                //                          MenuEntry::FmtPercent});
+                // m_menuEntries.push_back({MenuIndent::SubGroupIndent,
+                //                          "Lens centre only",
+                //                          MenuEntryType::Slider,
+                //                          SettingCASLensMask,
+                //                          0,
+                //                          100,
+                //                          MenuEntry::FmtPercent});
+                // casDarkGroup.finalize();
 
                 m_menuEntries.push_back({MenuIndent::SubGroupIndent,
                                          "Anamorphic",
@@ -1641,13 +1642,14 @@ namespace {
                                      0,
                                      MenuEntry::LastVal<PostColorSpaceType>(),
                                      MenuEntry::FmtEnum<PostColorSpaceType>});
-            m_menuEntries.push_back({MenuIndent::OptionIndent,
-                                     "Dithering",
-                                     MenuEntryType::Choice,
-                                     SettingPostDither,
-                                     0,
-                                     MenuEntry::LastVal<OffOnType>(),
-                                     MenuEntry::FmtEnum<OffOnType>});
+            // Disabled for testing: Dithering.
+            // m_menuEntries.push_back({MenuIndent::OptionIndent,
+            //                          "Dithering",
+            //                          MenuEntryType::Choice,
+            //                          SettingPostDither,
+            //                          0,
+            //                          MenuEntry::LastVal<OffOnType>(),
+            //                          MenuEntry::FmtEnum<OffOnType>});
 
             m_menuEntries.push_back(
                 {MenuIndent::OptionIndent, "World scale", MenuEntryType::Slider, SettingICD, 1, 10000, [&](int value) {

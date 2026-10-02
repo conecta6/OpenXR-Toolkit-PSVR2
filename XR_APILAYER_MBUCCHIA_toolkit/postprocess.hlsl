@@ -260,10 +260,10 @@ float4 mainPostProcess(in float4 position : SV_POSITION, in float2 texcoord : TE
   color = linear2srgb(color);
 #endif
 
-  // dither the output.
-  if (Params6.w) {
-    color = ApplyDither(color, position.xy);
-  }
+  // Disabled for testing: dither the output.
+  // if (Params6.w) {
+  //   color = ApplyDither(color, position.xy);
+  // }
 
   return float4(saturate(color), 1.0);
 }
@@ -309,10 +309,10 @@ float4 mainPassThrough(in float4 position : SV_POSITION, in float2 texcoord : TE
 
 #endif
 
-  // dither the output.
-  if (Params6.w) {
-    color = ApplyDither(color, position.xy);
-  }
+  // Disabled for testing: dither the output.
+  // if (Params6.w) {
+  //   color = ApplyDither(color, position.xy);
+  // }
 
   return float4(saturate(color), 1.0);
 }
